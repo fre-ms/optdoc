@@ -17,7 +17,7 @@ import re
 
 import pymupdf
 
-from anonymed.dokument.textebene import Seitentext
+from pseudonymed.dokument.textebene import Seitentext
 
 _WORT = re.compile(r"\S+")
 _MARKUP = re.compile(r"^[#*_>|`~=-]+$")

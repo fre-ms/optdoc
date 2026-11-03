@@ -489,7 +489,7 @@ def gitterbereiche(bild: Any) -> list[tuple[int, int, int, int]]:
     """Pixel boxes of table grids: connected long horizontal and vertical rules that
     together span at least 15 % of the width and 2 % of the height.  Tesseract's page
     segmentation treats such a grid as graphics and drops the cells; the OCR reads the
-    boxes again without their lines (:class:`~anonymed.dokument.ocr.TesseractBackend`)."""
+    boxes again without their lines (:class:`~pseudonymed.dokument.ocr.TesseractBackend`)."""
     import cv2
 
     grau = _grau(bild)

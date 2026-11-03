@@ -22,8 +22,8 @@ from typing import Protocol
 
 import pymupdf
 
-from anonymed.dokument.textebene import Seitentext
-from anonymed.kern.modell import Art, Fundstelle
+from pseudonymed.dokument.textebene import Seitentext
+from pseudonymed.kern.modell import Art, Fundstelle
 
 OCR_DPI = 300
 MAX_PIXEL = 4000  # longest side; photos from phones are larger than needed
@@ -134,7 +134,7 @@ class TesseractBackend:
 
     def __init__(self, sprache: str | None = None, programm: str | None = None,
                  tabellen: bool = True) -> None:
-        from anonymed.konfig import lade_einstellungen
+        from pseudonymed.konfig import lade_einstellungen
 
         self.tabellen = tabellen
         einstellungen = lade_einstellungen()
@@ -152,7 +152,7 @@ class TesseractBackend:
 
     @staticmethod
     def verfuegbar() -> bool:
-        from anonymed.konfig import lade_einstellungen
+        from pseudonymed.konfig import lade_einstellungen
 
         return tesseract_programm(lade_einstellungen().tesseract_pfad or None) is not None
 
@@ -197,7 +197,7 @@ class TesseractBackend:
 
     def _tabellen_nachlesen(self, pix: pymupdf.Pixmap, skala: float,
                             woerter: list[OCRWort]) -> list[OCRWort]:
-        from anonymed.dokument import aufbereitung as aufmodul
+        from pseudonymed.dokument import aufbereitung as aufmodul
 
         if not aufmodul.verfuegbar():
             return woerter
@@ -328,14 +328,14 @@ def _zerlege_zeile(zeile: OCRWort) -> list[OCRWort]:
 def backend(name: str = "auto", sprachen: str | None = None,
             tabellen: bool = True) -> OCRBackend | None:
     """Return the requested backend, or for "auto" the configured preference
-    ([ocr] backend in the configuration file, ANONYMED_OCR), else the first
+    ([ocr] backend in the configuration file, PSEUDONYMED_OCR), else the first
     available one; None for "aus".  ``sprachen`` names the language packs:
     "deu+eng" for Tesseract, a RapidOCR language type such as "de" or "latin";
     ``tabellen`` switches Tesseract's second pass for table grids."""
     name = (name or "auto").lower()
     sprachen = (sprachen or "").strip() or None
     if name == "auto":
-        from anonymed.konfig import lade_einstellungen
+        from pseudonymed.konfig import lade_einstellungen
 
         bevorzugt = (lade_einstellungen().ocr_backend or "auto").lower()
         if bevorzugt in ("rapidocr", "tesseract", "aus"):
