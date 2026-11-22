@@ -60,11 +60,11 @@ def _range(low: float | None, high: float | None, decimals: int) -> str:
 def _result(rng: random.Random, analyte: tuple) -> tuple[str, str, str, str, str]:
     """An invented result: name, value, unit, range, flag."""
     name, unit, low, high, decimals = analyte
-    lo = low if low is not None else (high or 1) * 0.1
+    lo = low if low is not None else (high or 1) * 0.3
     hi = high if high is not None else (low or 1) * 2.0
     span = hi - lo
-    value = rng.uniform(lo - 0.25 * span, hi + 0.35 * span)
-    value = max(value, 0.01 if decimals else 1)
+    value = rng.uniform(max(lo - 0.25 * span, 0.4 * lo), hi + 0.35 * span)
+    value = round(value, decimals)  # the flag goes by the printed value
     if low is None and rng.random() < 0.15:
         return name, f"< {_number(hi * 0.1, decimals)}", unit, _range(low, high, decimals), ""
     flag = ("H" if high is not None and value > high
