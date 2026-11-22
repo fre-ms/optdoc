@@ -10,9 +10,9 @@ which pseudonymises patient documents, and medorello, a records app that files d
 values from them, such as the results printed on a photographed laboratory report. optdoc itself knows
 nothing about either and works on any kind of document.
 
-**Status: pre-alpha (0.0.1).** The code comes from PseudonyMed, where it has been tested for weeks, with its
-history. Its identifiers are still German; they will become English before 0.1.0, together with the items
-under *Planned*. Expect the interface to change until then.
+**Status: pre-alpha (0.1.0).** The code comes from PseudonyMed, where it has been tested for weeks, with its
+history. Since 0.1.0 its identifiers are English (`docs/renames-0.1.0.md` lists the old German names). Expect
+the interface to grow with the items under *Planned*.
 
 ## What it does today
 
@@ -66,7 +66,7 @@ error, end with exit status 2 and never quote the document. Options: `--reader a
 
 Settings without a configuration file: `OPTDOC_OCR` (the engine `auto` stands for), `OPTDOC_TESSERACT`
 (the program's path), `OPTDOC_TESSERACT_LANGUAGES`. An application that embeds optdoc hands over its own
-with `optdoc.einstellungen.setze_einstellungen`.
+with `optdoc.settings.set_settings`.
 
 ## The reading
 
@@ -77,22 +77,22 @@ in page points and, for OCR, the engine's confidence. It also names the engine, 
 ## In Python
 
 ```python
-from optdoc.lesen import lies
-from optdoc import ausgabe
+from optdoc import output
+from optdoc.reading import read
 
-lesung = lies("photo.heic")
+reading = read("photo.heic")
 try:
-    ausgabe.schreibe(lesung, "results")
-    print(lesung.seiten[0].markdown)
+    output.write(reading, "results")
+    print(reading.pages[0].markdown)
 finally:
-    lesung.schliessen()
+    reading.close()
 ```
 
 ## Planned
 
-- English identifiers throughout (0.1.0).
 - Apple Vision as a reader on macOS, including its document recognition with table cells (macOS 26 and later).
-- Flattening curved pages (a book, a folded letter) and finding the page in a photo more robustly.
+- Flattening curved pages (a book, a folded letter), finding the page in a photo more robustly, and
+  turning an upside-down page in the automatic suggestion.
 - Two independent readings of every number, so that a value is only trusted where both agree.
 - A window to correct the clean-up and the reading by hand.
 - A test bench of photographed documents with known content, to measure each step.

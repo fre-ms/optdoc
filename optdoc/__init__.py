@@ -6,13 +6,13 @@ and lays it back onto the page as an invisible text layer.  Everything runs loca
 
 The modules:
 
-- :mod:`optdoc.laden`: open PDFs and images (HEIC too), images placed on a paper size;
-- :mod:`optdoc.aufbereitung`: the clean-up steps and their automatic suggestion;
+- :mod:`optdoc.loading`: open PDFs and images (HEIC too), images placed on a paper size;
+- :mod:`optdoc.cleanup`: the clean-up steps and their automatic suggestion;
 - :mod:`optdoc.ocr`: the OCR engines and the page text they produce;
-- :mod:`optdoc.textebene`: the page text with a box for every character;
-- :mod:`optdoc.gliederung`: lines, paragraphs, headings, lists and tables as Markdown;
-- :mod:`optdoc.textabgleich`: a corrected text laid back onto the OCR boxes;
-- :mod:`optdoc.einstellungen`: the settings of the OCR layer.
+- :mod:`optdoc.pagetext`: the page text with a box for every character;
+- :mod:`optdoc.structure`: lines, paragraphs, headings, lists and tables as Markdown;
+- :mod:`optdoc.alignment`: a corrected text laid back onto the OCR boxes;
+- :mod:`optdoc.settings`: the settings of the OCR layer.
 """
 
-__version__ = "0.0.1"
+__version__ = "0.1.0"

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pymupdf
 
-BEFUND_TEXT: list[list[str]] = [
+REPORT_TEXT: list[list[str]] = [
     [
         "Neurologische Gemeinschaftspraxis am Stadtpark",
         "Dr. med. Erika Beispiel · Fachärztin für Neurologie",
@@ -47,56 +47,57 @@ BEFUND_TEXT: list[list[str]] = [
 ]
 
 
-def erzeuge_befund(pfad: Path) -> Path:
+def make_report(path: Path) -> Path:
     """The report as a PDF with a text layer."""
     doc = pymupdf.open()
-    for zeilen in BEFUND_TEXT:
+    for lines in REPORT_TEXT:
         page = doc.new_page()
         y = 72.0
-        for zeile in zeilen:
-            page.insert_text((56, y), zeile, fontsize=10.5, fontname="helv")
+        for line in lines:
+            page.insert_text((56, y), line, fontsize=10.5, fontname="helv")
             y += 14.5
-    doc.save(pfad, garbage=0)
+    doc.save(path, garbage=0)
     doc.close()
-    return pfad
+    return path
 
 
-def rastere(doc: pymupdf.Document, dpi: int = 200) -> pymupdf.Document:
+def rasterise(doc: pymupdf.Document, dpi: int = 200) -> pymupdf.Document:
     """A new document whose pages are plain images of the given one."""
-    neu = pymupdf.open()
+    new = pymupdf.open()
     for page in doc:
         pix = page.get_pixmap(dpi=dpi, alpha=False)
-        seite = neu.new_page(width=page.rect.width, height=page.rect.height)
-        seite.insert_image(seite.rect, pixmap=pix)
-    return neu
+        sheet = new.new_page(width=page.rect.width, height=page.rect.height)
+        sheet.insert_image(sheet.rect, pixmap=pix)
+    return new
 
 
-def scan(befund: Path, ziel: Path, dpi: int = 200, rauschen: float = 0.0,
-         drehung: float = 0.0) -> Path:
+def scan(report: Path, target: Path, dpi: int = 200, noise: float = 0.0,
+         rotation: float = 0.0) -> Path:
     """Image-only PDF of a document, optionally with salt-and-pepper noise and a tilt
-    (PIL rotates counter-clockwise, so the right ``winkel`` is ``-drehung``)."""
-    with pymupdf.open(befund) as d:
-        bilder = rastere(d, dpi=dpi)
-    if rauschen or drehung:
+    (PIL rotates counter-clockwise, so the right ``angle`` is ``-rotation``)."""
+    with pymupdf.open(report) as d:
+        images = rasterise(d, dpi=dpi)
+    if noise or rotation:
         from PIL import Image
 
-        neu = pymupdf.open()
+        new = pymupdf.open()
         rng = random.Random(1)
-        for page in bilder:
+        for page in images:
             pix = page.get_pixmap(dpi=dpi, alpha=False)
-            bild = Image.open(io.BytesIO(pix.tobytes("png"))).convert("L")
-            px = bild.load()
-            if rauschen:
-                for _ in range(int(rauschen * bild.width * bild.height)):
-                    px[rng.randrange(bild.width), rng.randrange(bild.height)] = rng.choice((0, 255))
-            if drehung:
-                bild = bild.rotate(drehung, expand=False, fillcolor=255)
-            puffer = io.BytesIO()
-            bild.save(puffer, format="PNG")
-            seite = neu.new_page(width=page.rect.width, height=page.rect.height)
-            seite.insert_image(seite.rect, stream=puffer.getvalue())
-        bilder.close()
-        bilder = neu
-    bilder.save(ziel)
-    bilder.close()
-    return ziel
+            image = Image.open(io.BytesIO(pix.tobytes("png"))).convert("L")
+            px = image.load()
+            if noise:
+                for _ in range(int(noise * image.width * image.height)):
+                    xy = rng.randrange(image.width), rng.randrange(image.height)
+                    px[xy] = rng.choice((0, 255))
+            if rotation:
+                image = image.rotate(rotation, expand=False, fillcolor=255)
+            buffer = io.BytesIO()
+            image.save(buffer, format="PNG")
+            sheet = new.new_page(width=page.rect.width, height=page.rect.height)
+            sheet.insert_image(sheet.rect, stream=buffer.getvalue())
+        images.close()
+        images = new
+    images.save(target)
+    images.close()
+    return target

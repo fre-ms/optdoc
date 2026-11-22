@@ -1,8 +1,8 @@
-"""OCR for scanned pages and photos, delivered as a :class:`Seitentext`.
+"""OCR for scanned pages and photos, delivered as a :class:`PageText`.
 
 Two backends: RapidOCR (pure pip wheels, default when installed, Latin model
 for German text) and Tesseract (system binary, ``deu``).  Both return words
-with boxes in page points; :func:`seitentext_aus_woerter` turns them into the
+with boxes in page points; :func:`page_text_from_words` turns them into the
 same character map the text layer produces, so that recognition and
 redaction do not care where the text came from.  Character boxes inside a
 word are approximated by dividing the word box evenly.
@@ -22,22 +22,21 @@ from typing import TYPE_CHECKING, Any, NamedTuple, Protocol
 
 import pymupdf
 
-from optdoc.einstellungen import lade_einstellungen
-from optdoc.textebene import Seitentext
+from optdoc.pagetext import PageText
+from optdoc.settings import load_settings
 
 if TYPE_CHECKING:
     from rapidocr import RapidOCR
 
 OCR_DPI = 300
-MAX_PIXEL = 4000  # longest side; photos from phones are larger than needed
-UNSICHER_KONFIDENZ = 0.6
-UNLESBAR = "[unlesbar]"
+MAX_PIXELS = 4000  # longest side; photos from phones are larger than needed
+UNCERTAIN_CONFIDENCE = 0.6
 
-Kasten = tuple[float, float, float, float]
+Bounds = tuple[float, float, float, float]
 
 
 @dataclass
-class OCRWort:
+class OCRWord:
     """One recognised word: its text, its box in page points and the engine's confidence."""
 
     text: str
@@ -45,7 +44,7 @@ class OCRWort:
     y0: float
     x1: float
     y1: float
-    konfidenz: float = 1.0  # 0..1
+    confidence: float = 1.0  # 0..1
 
 
 class OCRBackend(Protocol):
@@ -53,24 +52,24 @@ class OCRBackend(Protocol):
 
     name: str
 
-    def erkenne(self, pix: pymupdf.Pixmap, skala: float) -> list[OCRWort]:
-        """Words of the rendered page; coordinates already divided by ``skala``."""
+    def recognise(self, pix: pymupdf.Pixmap, scale: float) -> list[OCRWord]:
+        """Words of the rendered page; coordinates already divided by ``scale``."""
 
 
-class OCRFehler(Exception):
+class OCRError(Exception):
     """An engine is missing, cannot be started, or failed on a page."""
 
 
-def _rendere(page: pymupdf.Page, dpi: int = OCR_DPI,
-             max_pixel: int = MAX_PIXEL) -> tuple[pymupdf.Pixmap, float]:
+def _render(page: pymupdf.Page, dpi: int = OCR_DPI,
+             max_pixel: int = MAX_PIXELS) -> tuple[pymupdf.Pixmap, float]:
     """Render the page for OCR; returns the pixmap and the pixels-per-point scale."""
-    skala = dpi / 72.0
-    laengste = max(page.rect.width, page.rect.height) * skala
-    if laengste > max_pixel:
-        skala *= max_pixel / laengste
-    pix = page.get_pixmap(matrix=pymupdf.Matrix(skala, skala), alpha=False,
+    scale = dpi / 72.0
+    longest = max(page.rect.width, page.rect.height) * scale
+    if longest > max_pixel:
+        scale *= max_pixel / longest
+    pix = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), alpha=False,
                           colorspace=pymupdf.csRGB)
-    return pix, skala
+    return pix, scale
 
 
 def _png(pix: pymupdf.Pixmap) -> bytes:
@@ -78,33 +77,33 @@ def _png(pix: pymupdf.Pixmap) -> bytes:
     return pix.tobytes("png")
 
 
-def _bild_aus_pixmap(pix: pymupdf.Pixmap) -> Any:
+def _image_from_pixmap(pix: pymupdf.Pixmap) -> Any:
     """The pixmap as a NumPy array, in BGR order for colour (what OpenCV and RapidOCR
     expect); a grey pixmap keeps its single channel."""
     import numpy as np
 
-    bild = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
-    return np.ascontiguousarray(bild[:, :, ::-1]) if pix.n == 3 else bild
+    image = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
+    return np.ascontiguousarray(image[:, :, ::-1]) if pix.n == 3 else image
 
 
-def vorverarbeite(pix: pymupdf.Pixmap) -> pymupdf.Pixmap:
+def preprocess(pix: pymupdf.Pixmap) -> pymupdf.Pixmap:
     """Median filter against salt-and-pepper noise; a no-op when Pillow is missing."""
     try:
         from PIL import Image, ImageFilter
     except ImportError:
         return pix
-    bild = Image.frombytes("RGB" if pix.n == 3 else "L", (pix.width, pix.height), pix.samples)
-    bild = bild.filter(ImageFilter.MedianFilter(3))
-    puffer = io.BytesIO()
-    bild.save(puffer, format="PNG")
-    neu = pymupdf.Pixmap(puffer.getvalue())
-    if neu.n != 3 or neu.alpha:
-        neu = pymupdf.Pixmap(pymupdf.csRGB, neu) if neu.n != 3 else pymupdf.Pixmap(neu, 0)
-    return neu
+    image = Image.frombytes("RGB" if pix.n == 3 else "L", (pix.width, pix.height), pix.samples)
+    image = image.filter(ImageFilter.MedianFilter(3))
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    new = pymupdf.Pixmap(buffer.getvalue())
+    if new.n != 3 or new.alpha:
+        new = pymupdf.Pixmap(pymupdf.csRGB, new) if new.n != 3 else pymupdf.Pixmap(new, 0)
+    return new
 
 
 # -- Tesseract -----------------------------------------------------------------------------------
-_TESSERACT_ORTE = (
+_TESSERACT_PLACES = (
     "/opt/homebrew/bin/tesseract",  # Homebrew on Apple silicon
     "/usr/local/bin/tesseract",  # Homebrew on Intel, MacPorts, manual installs
     "/usr/bin/tesseract",  # apt, dnf, pacman
@@ -114,178 +113,179 @@ _TESSERACT_ORTE = (
 )
 
 
-def tesseract_programm(pfad: str | None = None) -> str | None:
+def tesseract_program(path: str | None = None) -> str | None:
     """The system's Tesseract: configured path, PATH, then the usual install locations.
 
     Applications started from the Finder or a desktop menu get a minimal PATH
     without Homebrew or /usr/local, so the fixed locations matter.
     """
-    kandidaten: list[str | None] = [pfad] if pfad else []
-    kandidaten.append(shutil.which("tesseract"))
-    kandidaten += list(_TESSERACT_ORTE)
-    for k in kandidaten:
+    candidates: list[str | None] = [path] if path else []
+    candidates.append(shutil.which("tesseract"))
+    candidates += list(_TESSERACT_PLACES)
+    for k in candidates:
         if k and Path(k).is_file():
             return str(k)
     return None
 
 
-def tesseract_sprachen(programm: str) -> list[str]:
-    """The language packs ``programm --list-langs`` reports; empty when it cannot run."""
+def tesseract_languages(program: str) -> list[str]:
+    """The language packs ``program --list-langs`` reports; empty when it cannot run."""
     try:
-        lauf = subprocess.run([programm, "--list-langs"], capture_output=True, text=True,
+        run = subprocess.run([program, "--list-langs"], capture_output=True, text=True,
                               encoding="utf-8", errors="replace", check=False, timeout=30)
     except (OSError, subprocess.TimeoutExpired):
         return []
-    zeilen = (lauf.stdout + lauf.stderr).splitlines()
-    return [z.strip() for z in zeilen if z.strip() and not z.lower().startswith("list of")
+    lines = (run.stdout + run.stderr).splitlines()
+    return [z.strip() for z in lines if z.strip() and not z.lower().startswith("list of")
             and " " not in z.strip()]
 
 
-def _woerter_aus_tsv(tsv: str, skala: float, versatz: tuple[float, float]) -> list[OCRWort]:
+def _words_from_tsv(tsv: str, scale: float, offset: tuple[float, float]) -> list[OCRWord]:
     """Tesseract's TSV output as words in page points: the word rows (level 5) with
-    text, shifted by ``versatz`` pixels; rows with unreadable numbers are skipped."""
-    dx, dy = versatz
-    woerter: list[OCRWort] = []
-    for zeile in csv.DictReader(io.StringIO(tsv), delimiter="\t", quoting=csv.QUOTE_NONE):
-        text = (zeile.get("text") or "").strip()
-        if not text or zeile.get("level") != "5":
+    text, shifted by ``offset`` pixels; rows with unreadable numbers are skipped."""
+    dx, dy = offset
+    words: list[OCRWord] = []
+    for line in csv.DictReader(io.StringIO(tsv), delimiter="\t", quoting=csv.QUOTE_NONE):
+        text = (line.get("text") or "").strip()
+        if not text or line.get("level") != "5":
             continue
         try:
-            x, y = float(zeile["left"]) + dx, float(zeile["top"]) + dy
-            w, h = float(zeile["width"]), float(zeile["height"])
-            konf = float(zeile.get("conf") or 0) / 100.0
+            x, y = float(line["left"]) + dx, float(line["top"]) + dy
+            w, h = float(line["width"]), float(line["height"])
+            conf = float(line.get("conf") or 0) / 100.0
         except (KeyError, ValueError):
             continue
-        woerter.append(OCRWort(text, x / skala, y / skala, (x + w) / skala, (y + h) / skala,
-                               max(0.0, konf)))
-    return woerter
+        words.append(OCRWord(text, x / scale, y / scale, (x + w) / scale, (y + h) / scale,
+                               max(0.0, conf)))
+    return words
 
 
 class TesseractBackend:
     """Tesseract with ``--psm 3`` for the page and, when asked for, a second pass for
     tables: Tesseract's layout analysis takes a boxed grid for graphics and drops the
     cells (a bordered medication table came back as a single word).  For every grid
-    :func:`aufbereitung.gitterbereiche` finds, the crop is read again without its rules
+    :func:`cleanup.grid_areas` finds, the crop is read again without its rules
     as one block (``--psm 6``); the reading with the higher confidence mass wins the box.
     Measured on synthetic bordered tables at 200 dpi: 0 of 45 cell words → 42; pages
     without grids are untouched."""
 
     name = "tesseract"
 
-    def __init__(self, sprache: str | None = None, programm: str | None = None,
-                 tabellen: bool = True) -> None:
+    def __init__(self, language: str | None = None, program: str | None = None,
+                 tables: bool = True) -> None:
         """Locate the program and settle the language packs: the ones given, else the
         configured ones, else whatever of ``deu`` and ``eng`` is installed (``eng`` as
-        the last resort).  Raises :class:`OCRFehler` without a program."""
-        self.tabellen = tabellen
-        einstellungen = lade_einstellungen()
-        gefunden = tesseract_programm(programm or einstellungen.tesseract_pfad or None)
-        if not gefunden:
-            raise OCRFehler("Tesseract ist nicht installiert (Programm 'tesseract' fehlt).")
-        self.programm = gefunden
-        gewuenscht = sprache or einstellungen.tesseract_sprachen
-        installiert = set(tesseract_sprachen(self.programm))
-        if gewuenscht:
-            self.sprache = gewuenscht
+        the last resort).  Raises :class:`OCRError` without a program."""
+        self.tables = tables
+        settings = load_settings()
+        found = tesseract_program(program or settings.tesseract_path or None)
+        if not found:
+            raise OCRError("Tesseract is not installed (no program 'tesseract').")
+        self.program = found
+        wanted = language or settings.tesseract_languages
+        installed = set(tesseract_languages(self.program))
+        if wanted:
+            self.language = wanted
         else:
-            vorhanden = [s for s in ("deu", "eng") if s in installiert]
-            self.sprache = "+".join(vorhanden) if vorhanden else "eng"
+            present = [s for s in ("deu", "eng") if s in installed]
+            self.language = "+".join(present) if present else "eng"
 
     @staticmethod
-    def verfuegbar() -> bool:
+    def available() -> bool:
         """True when a Tesseract program is found (configured path, PATH or usual places)."""
-        return tesseract_programm(lade_einstellungen().tesseract_pfad or None) is not None
+        return tesseract_program(load_settings().tesseract_path or None) is not None
 
-    def erkenne(self, pix: pymupdf.Pixmap, skala: float) -> list[OCRWort]:
+    def recognise(self, pix: pymupdf.Pixmap, scale: float) -> list[OCRWord]:
         """Words of the page from the ``--psm 3`` run, revised inside table grids when
         the second pass is switched on."""
-        woerter = self._lauf(_png(pix), "3", skala)
-        if self.tabellen:
-            woerter = self._tabellen_nachlesen(pix, skala, woerter)
-        return woerter
+        words = self._run(_png(pix), "3", scale)
+        if self.tables:
+            words = self._reread_tables(pix, scale, words)
+        return words
 
-    def _lauf(self, png: bytes, psm: str, skala: float,
-              versatz: tuple[float, float] = (0.0, 0.0)) -> list[OCRWort]:
-        """One Tesseract run on PNG bytes; ``versatz`` (pixels) places a crop on the page."""
-        with tempfile.TemporaryDirectory() as ordner:
-            bild = Path(ordner) / "seite.png"
-            bild.write_bytes(png)
+    def _run(self, png: bytes, psm: str, scale: float,
+              offset: tuple[float, float] = (0.0, 0.0)) -> list[OCRWord]:
+        """One Tesseract run on PNG bytes; ``offset`` (pixels) places a crop on the page."""
+        with tempfile.TemporaryDirectory() as folder:
+            image = Path(folder) / "seite.png"
+            image.write_bytes(png)
             try:
-                lauf = subprocess.run(
-                    [self.programm, str(bild), "-", "-l", self.sprache, "--psm", psm, "tsv"],
+                run = subprocess.run(
+                    [self.program, str(image), "-", "-l", self.language, "--psm", psm, "tsv"],
                     capture_output=True, text=True, encoding="utf-8", errors="replace",
                     check=False, timeout=600,
                 )
             except (OSError, subprocess.TimeoutExpired) as e:
-                raise OCRFehler(f"Tesseract konnte nicht ausgeführt werden: {e}") from e
-        if lauf.returncode != 0:
-            raise OCRFehler(f"Tesseract meldet Fehler: {lauf.stderr.strip()[:300]}")
-        return _woerter_aus_tsv(lauf.stdout, skala, versatz)
+                raise OCRError(f"Tesseract could not be run: {e}") from e
+        if run.returncode != 0:
+            raise OCRError(f"Tesseract reports an error: {run.stderr.strip()[:300]}")
+        return _words_from_tsv(run.stdout, scale, offset)
 
-    def _tabellen_nachlesen(self, pix: pymupdf.Pixmap, skala: float,
-                            woerter: list[OCRWort]) -> list[OCRWort]:
+    def _reread_tables(self, pix: pymupdf.Pixmap, scale: float,
+                            words: list[OCRWord]) -> list[OCRWord]:
         """The second pass: every table grid on the page is read again without its
         rules as one block, and the better reading replaces the words in the grid's box.
         Needs OpenCV; without it the words come back unchanged."""
-        from optdoc import aufbereitung as aufmodul
+        from optdoc import cleanup
 
-        if not aufmodul.verfuegbar():
-            return woerter
-        bild = _bild_aus_pixmap(pix)
-        rand, polster = 10, 30
-        for gitter in aufmodul.gitterbereiche(bild):
-            x0, y0, x1, y1 = _mit_rand(gitter, rand, pix.width, pix.height)
-            png = _gitter_png(bild[y0:y1, x0:x1], polster)
+        if not cleanup.available():
+            return words
+        image = _image_from_pixmap(pix)
+        margin, padding = 10, 30
+        for grid in cleanup.grid_areas(image):
+            x0, y0, x1, y1 = _with_margin(grid, margin, pix.width, pix.height)
+            png = _grid_png(image[y0:y1, x0:x1], padding)
             if png is None:
                 continue
-            neu = self._lauf(png, "6", skala, (x0 - polster, y0 - polster))
-            kasten = (x0 / skala, y0 / skala, x1 / skala, y1 / skala)
-            woerter = _bessere_lesung(woerter, neu, kasten)
-        return woerter
+            new = self._run(png, "6", scale, (x0 - padding, y0 - padding))
+            bounds = (x0 / scale, y0 / scale, x1 / scale, y1 / scale)
+            words = _better_reading(words, new, bounds)
+        return words
 
 
-def _mit_rand(gitter: tuple[int, int, int, int], rand: int, breite: int,
-              hoehe: int) -> tuple[int, int, int, int]:
-    """The grid's pixel box widened by ``rand`` on every side and clamped to the image."""
-    x0, y0, x1, y1 = gitter
-    return max(0, x0 - rand), max(0, y0 - rand), min(breite, x1 + rand), min(hoehe, y1 + rand)
+def _with_margin(grid: tuple[int, int, int, int], margin: int, width: int,
+              height: int) -> tuple[int, int, int, int]:
+    """The grid's pixel box widened by ``margin`` on every side and clamped to the image."""
+    x0, y0, x1, y1 = grid
+    return (max(0, x0 - margin), max(0, y0 - margin),
+            min(width, x1 + margin), min(height, y1 + margin))
 
 
-def _gitter_png(ausschnitt: Any, polster: int) -> bytes | None:
+def _grid_png(crop: Any, padding: int) -> bytes | None:
     """The crop of a table grid as PNG for the second pass: rules removed and a white
-    border of ``polster`` pixels added, so Tesseract sees a free-standing text block.
+    border of ``padding`` pixels added, so Tesseract sees a free-standing text block.
     None when OpenCV cannot encode the image."""
     import cv2
 
-    from optdoc import aufbereitung as aufmodul
+    from optdoc import cleanup
 
-    ohne = aufmodul.ohne_linien(ausschnitt)
-    weiss = (255, 255, 255) if ohne.ndim == 3 else 255
-    ohne = cv2.copyMakeBorder(ohne, polster, polster, polster, polster, cv2.BORDER_CONSTANT,
-                              value=weiss)
-    ok, png = cv2.imencode(".png", ohne)
+    without = cleanup.without_lines(crop)
+    white = (255, 255, 255) if without.ndim == 3 else 255
+    without = cv2.copyMakeBorder(without, padding, padding, padding, padding, cv2.BORDER_CONSTANT,
+                              value=white)
+    ok, png = cv2.imencode(".png", without)
     return png.tobytes() if ok else None
 
 
-def _bessere_lesung(woerter: list[OCRWort], neu: list[OCRWort], kasten: Kasten) -> list[OCRWort]:
-    """The page words with those inside ``kasten`` replaced by ``neu`` when the new
+def _better_reading(words: list[OCRWord], new: list[OCRWord], bounds: Bounds) -> list[OCRWord]:
+    """The page words with those inside ``bounds`` replaced by ``new`` when the new
     reading carries the higher confidence mass; otherwise the words unchanged."""
-    innen = [w for w in woerter if _innerhalb(w, kasten)]
-    if _konfidenzmasse(neu) <= _konfidenzmasse(innen):
-        return woerter
-    return [w for w in woerter if w not in innen] + neu
+    inside = [w for w in words if _inside(w, bounds)]
+    if _confidence_mass(new) <= _confidence_mass(inside):
+        return words
+    return [w for w in words if w not in inside] + new
 
 
-def _innerhalb(w: OCRWort, kasten: Kasten) -> bool:
-    """True when the word's box lies entirely inside ``kasten`` (page points)."""
-    x0, y0, x1, y1 = kasten
+def _inside(w: OCRWord, bounds: Bounds) -> bool:
+    """True when the word's box lies entirely inside ``bounds`` (page points)."""
+    x0, y0, x1, y1 = bounds
     return w.x0 >= x0 and w.y0 >= y0 and w.x1 <= x1 and w.y1 <= y1
 
 
-def _konfidenzmasse(woerter: Iterable[OCRWort]) -> float:
+def _confidence_mass(words: Iterable[OCRWord]) -> float:
     """Confidence weighted by length, letters and digits only: the better of two
     readings of the same box."""
-    return sum(w.konfidenz * len(w.text) for w in woerter if any(c.isalnum() for c in w.text))
+    return sum(w.confidence * len(w.text) for w in words if any(c.isalnum() for c in w.text))
 
 
 # -- RapidOCR ------------------------------------------------------------------------------------
@@ -301,33 +301,34 @@ class RapidOCRBackend:
     # 1.32).  Measured on the synthetic report (similarity to the true text, page 1 and
     # 2): clean 200 dpi 0.936/1.0 with it, 1.0/1.0 without; noisy 150 dpi 0.997/0.856
     # against 0.997/1.0; never worse without.  So it is off; an upside-down page is a
-    # matter for schaetze_ausrichtung and the plan's rotation.
-    zeilen_drehen = False
+    # matter for estimate_orientation and the plan's rotation.
+    turn_lines = False
 
-    def __init__(self, sprache: str | None = "de") -> None:
-        """Start the engine for ``sprache`` (a RapidOCR ``lang_type``), else the default."""
+    def __init__(self, language: str | None = "de") -> None:
+        """Start the engine for ``language`` (a RapidOCR ``lang_type``), else the default."""
         try:
             from rapidocr import RapidOCR
         except ImportError as e:
-            raise OCRFehler("RapidOCR ist nicht installiert (Extra 'ocr').") from e
+            raise OCRError("RapidOCR is not installed (extra 'ocr').") from e
         self._RapidOCR = RapidOCR
         self._params = {"Global.log_level": "error"}
-        sprachmodell = self._sprachmodell(sprache)
-        self._standard = sprachmodell is None
-        self._engine = sprachmodell if sprachmodell is not None else RapidOCR(params=self._params)
+        language_model = self._language_model(language)
+        self._default = language_model is None
+        self._engine = (language_model if language_model is not None
+                        else RapidOCR(params=self._params))
 
-    def _sprachmodell(self, sprache: str | None) -> RapidOCR | None:
+    def _language_model(self, language: str | None) -> RapidOCR | None:
         """The engine with ``Rec.lang_type`` set, or None when no language was asked
         for or RapidOCR refuses it at start-up."""
-        if not sprache:
+        if not language:
             return None
         try:
-            return self._RapidOCR(params={**self._params, "Rec.lang_type": sprache})
+            return self._RapidOCR(params={**self._params, "Rec.lang_type": language})
         except Exception:
             return None
 
     @staticmethod
-    def verfuegbar() -> bool:
+    def available() -> bool:
         """True when the ``rapidocr`` package can be imported."""
         try:
             import rapidocr  # noqa: F401
@@ -335,323 +336,324 @@ class RapidOCRBackend:
             return False
         return True
 
-    def erkenne(self, pix: pymupdf.Pixmap, skala: float) -> list[OCRWort]:
+    def recognise(self, pix: pymupdf.Pixmap, scale: float) -> list[OCRWord]:
         """Words of the page: the engine's own word boxes where it gives them, else its
         text lines split into words by character share."""
-        return _woerter_aus_ergebnis(self._erkennung(_bild_aus_pixmap(pix)), skala)
+        return _words_from_result(self._recognition(_image_from_pixmap(pix)), scale)
 
-    def _erkennung(self, bild: Any) -> Any:
+    def _recognition(self, image: Any) -> Any:
         """The engine's result for the image.  The language model is loaded lazily;
         when it is unsupported or missing, the first page fails and the bundled default
         model takes over for good."""
         try:
-            return self._engine(bild, return_word_box=True, use_cls=self.zeilen_drehen)
+            return self._engine(image, return_word_box=True, use_cls=self.turn_lines)
         except Exception as e:
-            if self._standard:
-                raise OCRFehler(f"RapidOCR fehlgeschlagen: {e}") from e
+            if self._default:
+                raise OCRError(f"RapidOCR failed: {e}") from e
         self._engine = self._RapidOCR(params=self._params)
-        self._standard = True
-        return self._engine(bild, return_word_box=True, use_cls=self.zeilen_drehen)
+        self._default = True
+        return self._engine(image, return_word_box=True, use_cls=self.turn_lines)
 
 
-def _woerter_aus_ergebnis(ergebnis: Any, skala: float) -> list[OCRWort]:
+def _words_from_result(result: Any, scale: float) -> list[OCRWord]:
     """RapidOCR's output as words in page points: for every text line the engine's
     word boxes when it reports them, otherwise the line box split by character share."""
-    boxen = getattr(ergebnis, "boxes", None)
-    if boxen is None:
+    boxes = getattr(result, "boxes", None)
+    if boxes is None:
         return []
-    wortboxen = getattr(ergebnis, "word_results", None) or ()
-    woerter: list[OCRWort] = []
-    for i, (box, text, score) in enumerate(zip(boxen, ergebnis.txts, ergebnis.scores,
+    word_boxes = getattr(result, "word_results", None) or ()
+    words: list[OCRWord] = []
+    for i, (box, text, score) in enumerate(zip(boxes, result.txts, result.scores,
                                                strict=False)):
-        if i < len(wortboxen) and wortboxen[i]:
-            woerter.extend(_woerter_aus_wortboxen(wortboxen[i], skala))
+        if i < len(word_boxes) and word_boxes[i]:
+            words.extend(_words_from_word_boxes(word_boxes[i], scale))
         else:
-            zeile = OCRWort(str(text).strip(), *_grenzen(box, skala), float(score))
-            woerter.extend(_zerlege_zeile(zeile))
-    return woerter
+            line = OCRWord(str(text).strip(), *_bounds(box, scale), float(score))
+            words.extend(_split_line(line))
+    return words
 
 
-def _grenzen(punkte: Iterable[Any], skala: float) -> Kasten:
-    """Bounding box of a polygon in page points: pixel corners divided by ``skala``."""
-    xs = [float(pt[0]) for pt in punkte]
-    ys = [float(pt[1]) for pt in punkte]
-    return min(xs) / skala, min(ys) / skala, max(xs) / skala, max(ys) / skala
+def _bounds(points: Iterable[Any], scale: float) -> Bounds:
+    """Bounding box of a polygon in page points: pixel corners divided by ``scale``."""
+    xs = [float(pt[0]) for pt in points]
+    ys = [float(pt[1]) for pt in points]
+    return min(xs) / scale, min(ys) / scale, max(xs) / scale, max(ys) / scale
 
 
-def _woerter_aus_wortboxen(wortboxen: Iterable[Any], skala: float) -> list[OCRWort]:
+def _words_from_word_boxes(word_boxes: Iterable[Any], scale: float) -> list[OCRWord]:
     """The engine's ``(word, score, polygon)`` triples of one line as words, blanks dropped."""
-    return [OCRWort(str(wort).strip(), *_grenzen(wbox, skala), float(wort_score))
-            for wort, wort_score, wbox in wortboxen if str(wort).strip()]
+    return [OCRWord(str(word).strip(), *_bounds(wbox, scale), float(word_score))
+            for word, word_score, wbox in word_boxes if str(word).strip()]
 
 
-def _zerlege_zeile(zeile: OCRWort) -> list[OCRWort]:
+def _split_line(line: OCRWord) -> list[OCRWord]:
     """RapidOCR returns text lines; split into words with boxes by character share."""
-    teile = zeile.text.split()
-    if len(teile) <= 1:
-        return [zeile] if zeile.text else []
-    gesamt = len(zeile.text)
-    breite = zeile.x1 - zeile.x0
-    woerter: list[OCRWort] = []
+    parts = line.text.split()
+    if len(parts) <= 1:
+        return [line] if line.text else []
+    total = len(line.text)
+    width = line.x1 - line.x0
+    words: list[OCRWord] = []
     pos = 0
-    for teil in teile:
-        start = zeile.text.index(teil, pos)
-        ende = start + len(teil)
-        pos = ende
-        woerter.append(OCRWort(teil, zeile.x0 + breite * start / gesamt, zeile.y0,
-                               zeile.x0 + breite * ende / gesamt, zeile.y1, zeile.konfidenz))
-    return woerter
+    for part in parts:
+        start = line.text.index(part, pos)
+        end = start + len(part)
+        pos = end
+        words.append(OCRWord(part, line.x0 + width * start / total, line.y0,
+                               line.x0 + width * end / total, line.y1, line.confidence))
+    return words
 
 
 # -- selection -----------------------------------------------------------------------------------
-_BACKEND_NAMEN = ("rapidocr", "tesseract", "aus")
+_BACKEND_NAMES = ("rapidocr", "tesseract", "none")
 
 
-def _bevorzugtes_backend(name: str) -> str:
+def _preferred_backend(name: str) -> str:
     """The name "auto" resolved to the configured preference (``OPTDOC_OCR``, or what
-    the calling application set) when that names an engine or "aus"; any other name
+    the calling application set) when that names an engine or "none"; any other name
     unchanged."""
     if name != "auto":
         return name
-    bevorzugt = (lade_einstellungen().ocr_backend or "auto").lower()
-    return bevorzugt if bevorzugt in _BACKEND_NAMEN else name
+    preferred = (load_settings().ocr_backend or "auto").lower()
+    return preferred if preferred in _BACKEND_NAMES else name
 
 
-def _erstes_verfuegbare(sprachen: str | None, tabellen: bool) -> OCRBackend | None:
-    """RapidOCR when installed, else Tesseract, else None.  ``sprachen`` only reaches
+def _first_available(languages: str | None, tables: bool) -> OCRBackend | None:
+    """RapidOCR when installed, else Tesseract, else None.  ``languages`` only reaches
     the engine whose notation it uses: "+" joins Tesseract packs, a single word is a
     RapidOCR language type."""
-    if RapidOCRBackend.verfuegbar():
-        return RapidOCRBackend(sprachen if sprachen and "+" not in sprachen else "de")
-    if TesseractBackend.verfuegbar():
-        return TesseractBackend(sprache=sprachen if sprachen and "+" in sprachen else None,
-                                tabellen=tabellen)
+    if RapidOCRBackend.available():
+        return RapidOCRBackend(languages if languages and "+" not in languages else "de")
+    if TesseractBackend.available():
+        return TesseractBackend(language=languages if languages and "+" in languages else None,
+                                tables=tables)
     return None
 
 
-def backend(name: str = "auto", sprachen: str | None = None,
-            tabellen: bool = True) -> OCRBackend | None:
+def backend(name: str = "auto", languages: str | None = None,
+            tables: bool = True) -> OCRBackend | None:
     """Return the requested backend, or for "auto" the configured preference
     (``OPTDOC_OCR``, or what the calling application set), else the first
-    available one; None for "aus".  ``sprachen`` names the language packs:
+    available one; None for "none".  ``languages`` names the language packs:
     "deu+eng" for Tesseract, a RapidOCR language type such as "de" or "latin";
-    ``tabellen`` switches Tesseract's second pass for table grids."""
-    name = _bevorzugtes_backend((name or "auto").lower())
-    sprachen = (sprachen or "").strip() or None
-    wahl: dict[str, Callable[[], OCRBackend | None]] = {
-        "aus": lambda: None,
-        "rapidocr": lambda: RapidOCRBackend(sprachen or "de"),
-        "tesseract": lambda: TesseractBackend(sprache=sprachen, tabellen=tabellen),
-        "auto": lambda: _erstes_verfuegbare(sprachen, tabellen),
+    ``tables`` switches Tesseract's second pass for table grids."""
+    name = _preferred_backend((name or "auto").lower())
+    languages = (languages or "").strip() or None
+    options: dict[str, Callable[[], OCRBackend | None]] = {
+        "none": lambda: None,
+        "rapidocr": lambda: RapidOCRBackend(languages or "de"),
+        "tesseract": lambda: TesseractBackend(language=languages, tables=tables),
+        "auto": lambda: _first_available(languages, tables),
     }
-    if name not in wahl:
-        raise OCRFehler(f"Unbekanntes OCR-Backend: {name!r} (auto, rapidocr, tesseract, aus).")
-    return wahl[name]()
+    if name not in options:
+        raise OCRError(f"unknown OCR engine: {name!r} (auto, rapidocr, tesseract, none)")
+    return options[name]()
 
 
-def verfuegbare_backends() -> list[str]:
+def available_backends() -> list[str]:
     """Names of the installed engines in order of preference: "rapidocr", "tesseract"."""
-    namen = []
-    if RapidOCRBackend.verfuegbar():
-        namen.append("rapidocr")
-    if TesseractBackend.verfuegbar():
-        namen.append("tesseract")
-    return namen
+    names = []
+    if RapidOCRBackend.available():
+        names.append("rapidocr")
+    if TesseractBackend.available():
+        names.append("tesseract")
+    return names
 
 
-# -- words -> Seitentext ---------------------------------------------------------------------------
-class _Lueckenmass(NamedTuple):
+# -- words -> PageText ---------------------------------------------------------------------------
+class _GapMeasure(NamedTuple):
     """How many gaps between neighbouring words the page has, and the usual (median)
     gap width in points."""
 
-    anzahl: int
-    ueblich: float
+    count: int
+    usual: float
 
-    def ist_zellgrenze(self, luecke: float, zeilenhoehe: float) -> bool:
+    def is_cell_boundary(self, space: float, line_height: float) -> bool:
         """A gap far wider than usual (table cells, columns); judged only once the
         page has enough gaps for the usual width to mean something."""
-        return self.anzahl >= 4 and luecke > max(1.5 * zeilenhoehe, 3.0 * self.ueblich)
+        return self.count >= 4 and space > max(1.5 * line_height, 3.0 * self.usual)
 
 
-def _gleiche_zeile(w: OCRWort, ref: OCRWort) -> bool:
+def _same_line(w: OCRWord, ref: OCRWord) -> bool:
     """True when the word's vertical centre falls into the reference word's band and
     both heights are of the same order, so a heading is not pulled into a body line."""
-    mitte = (w.y0 + w.y1) / 2
-    hoehe, ref_hoehe = w.y1 - w.y0, ref.y1 - ref.y0
-    return ref.y0 - 1 <= mitte <= ref.y1 + 1 and abs(hoehe - ref_hoehe) < max(hoehe, ref_hoehe)
+    middle = (w.y0 + w.y1) / 2
+    height, ref_height = w.y1 - w.y0, ref.y1 - ref.y0
+    return ref.y0 - 1 <= middle <= ref.y1 + 1 and abs(height - ref_height) < max(height, ref_height)
 
 
-def _zeilen_aus_woertern(woerter: Iterable[OCRWort]) -> list[list[OCRWort]]:
+def _lines_from_words(words: Iterable[OCRWord]) -> list[list[OCRWord]]:
     """Words grouped into lines by vertical overlap with each line's first word, the
     lines top to bottom and the words of a line left to right; blank words dropped."""
-    zeilen: list[list[OCRWort]] = []
-    for w in sorted((w for w in woerter if w.text), key=lambda w: (w.y0, w.x0)):
-        zeile = next((z for z in zeilen if _gleiche_zeile(w, z[0])), None)
-        if zeile is None:
-            zeilen.append([w])
+    lines: list[list[OCRWord]] = []
+    for w in sorted((w for w in words if w.text), key=lambda w: (w.y0, w.x0)):
+        line = next((z for z in lines if _same_line(w, z[0])), None)
+        if line is None:
+            lines.append([w])
         else:
-            zeile.append(w)
-    zeilen.sort(key=lambda z: min(w.y0 for w in z))
-    for zeile in zeilen:
-        zeile.sort(key=lambda w: w.x0)
-    return zeilen
+            line.append(w)
+    lines.sort(key=lambda z: min(w.y0 for w in z))
+    for line in lines:
+        line.sort(key=lambda w: w.x0)
+    return lines
 
 
-def _lueckenmass(zeilen: list[list[OCRWort]]) -> _Lueckenmass:
+def _gap_measure(lines: list[list[OCRWord]]) -> _GapMeasure:
     """Count and median of the positive gaps between neighbouring words of a line."""
-    luecken = sorted(b.x0 - a.x1 for z in zeilen for a, b in zip(z, z[1:], strict=False)
+    spaces = sorted(b.x0 - a.x1 for z in lines for a, b in zip(z, z[1:], strict=False)
                      if b.x0 > a.x1)
-    return _Lueckenmass(len(luecken), luecken[len(luecken) // 2] if luecken else 0.0)
+    return _GapMeasure(len(spaces), spaces[len(spaces) // 2] if spaces else 0.0)
 
 
-def _fuege_wort_an(seite: Seitentext, w: OCRWort, nr: int) -> None:
-    """Append the word's characters to line ``nr`` with boxes from an even split of the
+def _append_word(page_text: PageText, w: OCRWord, line_no: int) -> None:
+    """Append the word's characters to line ``line_no`` with boxes from an even split of the
     word box, then record the word's confidence and its span in the page text."""
     n = max(len(w.text), 1)
-    schritt = (w.x1 - w.x0) / n
-    groesse = max(w.y1 - w.y0, 1.0) * 0.8
-    basislinie = w.y1 - 0.2 * (w.y1 - w.y0)
-    start = len(seite.text)
+    step = (w.x1 - w.x0) / n
+    size = max(w.y1 - w.y0, 1.0) * 0.8
+    baseline = w.y1 - 0.2 * (w.y1 - w.y0)
+    start = len(page_text.text)
     for k, c in enumerate(w.text):
-        box = (w.x0 + k * schritt, w.y0, w.x0 + (k + 1) * schritt, w.y1)
-        seite._fuege_an(c, box, nr, groesse, basislinie)
-    seite.konfidenzen.append(w.konfidenz)
-    seite.wortspannen.append((start, len(seite.text)))
+        box = (w.x0 + k * step, w.y0, w.x0 + (k + 1) * step, w.y1)
+        page_text._append_char(c, box, line_no, size, baseline)
+    page_text.confidences.append(w.confidence)
+    page_text.word_spans.append((start, len(page_text.text)))
 
 
-def seitentext_aus_woerter(
-    woerter: Iterable[OCRWort], nummer: int, breite: float, hoehe: float
-) -> Seitentext:
+def page_text_from_words(
+    words: Iterable[OCRWord], number: int, width: float, height: float
+) -> PageText:
     """Group words into lines by vertical overlap, order them, and build the character map.
     A gap between neighbouring words far wider than usual (table cells, columns) becomes
     a tab in the page text: the rules treat it like a space, the Markdown structuring
     reads it as a cell boundary."""
-    seite = Seitentext(nummer=nummer, breite=breite, hoehe=hoehe, quelle="ocr")
-    zeilen = _zeilen_aus_woertern(woerter)
-    mass = _lueckenmass(zeilen)
-    for nr, zeile in enumerate(zeilen, 1):
-        for i, w in enumerate(zeile):
+    page_text = PageText(number=number, width=width, height=height, source="ocr")
+    lines = _lines_from_words(words)
+    measure = _gap_measure(lines)
+    for line_no, line in enumerate(lines, 1):
+        for i, w in enumerate(line):
             if i > 0:
-                zellgrenze = mass.ist_zellgrenze(w.x0 - zeile[i - 1].x1, w.y1 - w.y0)
-                seite._fuege_an("\t" if zellgrenze else " ", None, nr, w.y1 - w.y0, w.y1)
-            _fuege_wort_an(seite, w, nr)
-        seite._fuege_an("\n", None, nr, 0.0, 0.0)
-    return seite
+                cell_boundary = measure.is_cell_boundary(w.x0 - line[i - 1].x1, w.y1 - w.y0)
+                page_text._append_char("\t" if cell_boundary else " ", None, line_no,
+                                       w.y1 - w.y0, w.y1)
+            _append_word(page_text, w, line_no)
+        page_text._append_char("\n", None, line_no, 0.0, 0.0)
+    return page_text
 
 
 # -- unreadable lines ------------------------------------------------------------------------------
-class _Wortlage(NamedTuple):
+class _WordSpan(NamedTuple):
     """An OCR word's offsets in the page text and whether it counts as uncertain."""
 
     start: int
-    ende: int
-    unsicher: bool
+    end: int
+    uncertain: bool
 
 
-def _wort_unsicher(text: str, konfidenz: float) -> bool:
+def _word_uncertain(text: str, confidence: float) -> bool:
     """True below the confidence threshold, or for a lone letter (punctuation aside)
     that is not read with near certainty: a fragment of a word OCR could not read."""
-    kern = text.strip(",.;:()*\"'")
-    if konfidenz < UNSICHER_KONFIDENZ:
+    core = text.strip(",.;:()*\"'")
+    if confidence < UNCERTAIN_CONFIDENCE:
         return True
     # a lone letter in the middle of a line is a fragment of a word OCR could not read
-    return len(kern) == 1 and kern.isalpha() and konfidenz < 0.995
+    return len(core) == 1 and core.isalpha() and confidence < 0.995
 
 
-def _woerter_je_zeile(seite: Seitentext) -> dict[int, list[_Wortlage]]:
+def _words_per_line(page_text: PageText) -> dict[int, list[_WordSpan]]:
     """The page's OCR words grouped by line, in text order, each judged for certainty."""
-    je_zeile: dict[int, list[_Wortlage]] = {}
-    for (a, b), konf in zip(seite.wortspannen, seite.konfidenzen, strict=True):
-        lage = _Wortlage(a, b, _wort_unsicher(seite.text[a:b], konf))
-        je_zeile.setdefault(seite.zeile_von(a), []).append(lage)
-    return je_zeile
+    per_line: dict[int, list[_WordSpan]] = {}
+    for (a, b), conf in zip(page_text.word_spans, page_text.confidences, strict=True):
+        spans = _WordSpan(a, b, _word_uncertain(page_text.text[a:b], conf))
+        per_line.setdefault(page_text.line_of(a), []).append(spans)
+    return per_line
 
 
-def _zeile_unlesbar(woerter: list[_Wortlage], mindestanteil: float) -> bool:
+def _line_unreadable(words: list[_WordSpan], min_share: float) -> bool:
     """True for a line with at least three uncertain words, or with a share of them
-    at or above ``mindestanteil``; a single uncertain word only counts when it is the
+    at or above ``min_share``; a single uncertain word only counts when it is the
     whole line.  Confidently "read" fragments next to garbage are garbage too, so the
     whole line is taken."""
-    unsicher = sum(1 for w in woerter if w.unsicher)
-    if unsicher == 0:
+    uncertain = sum(1 for w in words if w.uncertain)
+    if uncertain == 0:
         return False
-    viele = unsicher >= 3 or unsicher / len(woerter) >= mindestanteil
-    return viele and (unsicher >= 2 or len(woerter) == 1)
+    many = uncertain >= 3 or uncertain / len(words) >= min_share
+    return many and (uncertain >= 2 or len(words) == 1)
 
 
 @dataclass
-class UnlesbareZeile:
+class UnreadableLine:
     """A line OCR could not read: its page, its span ``[start, ende)`` in the page text,
     that text, its boxes in page points and the font size the line was set in."""
 
-    seite: int
+    page_number: int
     start: int
-    ende: int
+    end: int
     text: str
-    rects: list[Kasten]
-    schriftgroesse: float
+    rects: list[Bounds]
+    font_size: float
 
 
-def _unlesbare_zeile(seite: Seitentext, a: int, b: int) -> UnlesbareZeile:
+def _unreadable_line(page_text: PageText, a: int, b: int) -> UnreadableLine:
     """The unreadable line covering the page text ``[a, b)``."""
-    return UnlesbareZeile(
-        seite=seite.nummer, start=a, ende=b, text=seite.text[a:b],
-        rects=[tuple(r) for r in seite.rects(a, b)], schriftgroesse=seite.schriftgroesse(a, b),
+    return UnreadableLine(
+        page_number=page_text.number, start=a, end=b, text=page_text.text[a:b],
+        rects=[tuple(r) for r in page_text.rects(a, b)], font_size=page_text.font_size(a, b),
     )
 
 
-def unlesbare_regionen(seite: Seitentext, mindestanteil: float = 0.4) -> list[UnlesbareZeile]:
+def unreadable_lines(page_text: PageText, min_share: float = 0.4) -> list[UnreadableLine]:
     """Lines OCR could not read (many uncertain words or fragments).
 
     What cannot be read cannot be checked: such a line may hold a name, a date
     or handwriting.  A caller decides what to do with it; a pseudonymiser covers
-    the whole line (and may mark it with :data:`UNLESBAR`).
+    the whole line.
     """
-    if seite.quelle != "ocr" or not seite.wortspannen:
+    if page_text.source != "ocr" or not page_text.word_spans:
         return []
-    return [_unlesbare_zeile(seite, woerter[0].start, woerter[-1].ende)
-            for woerter in _woerter_je_zeile(seite).values()
-            if _zeile_unlesbar(woerter, mindestanteil)]
+    return [_unreadable_line(page_text, words[0].start, words[-1].end)
+            for words in _words_per_line(page_text).values()
+            if _line_unreadable(words, min_share)]
 
 
 # -- page ------------------------------------------------------------------------------------------
-def _gefiltert(pix: pymupdf.Pixmap, filter_: Callable[[Any], Any]) -> pymupdf.Pixmap:
+def _filtered(pix: pymupdf.Pixmap, filter_: Callable[[Any], Any]) -> pymupdf.Pixmap:
     """The rendering after the NumPy filter, back as an RGB pixmap; a grey result is
     spread over three channels."""
     import numpy as np
 
-    bild = filter_(_bild_aus_pixmap(pix))
-    if bild.ndim == 2:
-        bild = np.repeat(bild[:, :, None], 3, axis=2)
+    image = filter_(_image_from_pixmap(pix))
+    if image.ndim == 2:
+        image = np.repeat(image[:, :, None], 3, axis=2)
     else:
-        bild = bild[:, :, ::-1]
-    bild = np.ascontiguousarray(bild)
-    return pymupdf.Pixmap(pymupdf.csRGB, bild.shape[1], bild.shape[0], bild.tobytes(), False)
+        image = image[:, :, ::-1]
+    image = np.ascontiguousarray(image)
+    return pymupdf.Pixmap(pymupdf.csRGB, image.shape[1], image.shape[0], image.tobytes(), False)
 
 
-def erkenne_seite(page: pymupdf.Page, backend_: OCRBackend, nummer: int | None = None,
-                  dpi: int = OCR_DPI, vorverarbeitung: bool = True,
-                  max_pixel: int = MAX_PIXEL, filter_=None) -> Seitentext:
+def recognise_page(page: pymupdf.Page, backend_: OCRBackend, number: int | None = None,
+                  dpi: int = OCR_DPI, preprocessing: bool = True,
+                  max_pixel: int = MAX_PIXELS, filter_=None) -> PageText:
     """OCR of one page.  ``filter_`` (NumPy BGR image -> image) runs on the rendering
     before the engine, for the letter-aware finish of upscaled pages."""
-    pix, skala = _rendere(page, dpi, max_pixel)
-    if vorverarbeitung:
-        pix = vorverarbeite(pix)
+    pix, scale = _render(page, dpi, max_pixel)
+    if preprocessing:
+        pix = preprocess(pix)
     if filter_ is not None:
-        pix = _gefiltert(pix, filter_)
-    woerter = backend_.erkenne(pix, skala)
-    nummer = page.number if nummer is None else nummer
-    return seitentext_aus_woerter(woerter, nummer, page.rect.width, page.rect.height)
+        pix = _filtered(pix, filter_)
+    words = backend_.recognise(pix, scale)
+    number = page.number if number is None else number
+    return page_text_from_words(words, number, page.rect.width, page.rect.height)
 
 
-def braucht_ocr(page: pymupdf.Page, textebene: Seitentext, mindestanteil: float = 0.2) -> bool:
+def needs_ocr(page: pymupdf.Page, text_layer: PageText, min_share: float = 0.2) -> bool:
     """True without a text layer, or when images cover a good part of the page
     (a scanned letter embedded in a PDF with a text layer)."""
-    if not textebene.hat_textebene:
+    if not text_layer.has_text_layer:
         return True
-    flaeche = 0.0
+    area = 0.0
     for info in page.get_image_info():
         r = pymupdf.Rect(info["bbox"]) & page.rect
         if r.width > 40 and r.height > 40:
-            flaeche += r.width * r.height
-    return flaeche >= mindestanteil * page.rect.width * page.rect.height
+            area += r.width * r.height
+    return area >= min_share * page.rect.width * page.rect.height
