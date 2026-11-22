@@ -5,7 +5,7 @@ from __future__ import annotations
 import pymupdf
 import pytest
 
-from pseudonymed.dokument.textebene import (
+from optdoc.textebene import (
     Seitentext,
     _glyphen,
     _lese_zeile,

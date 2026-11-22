@@ -22,8 +22,8 @@ from typing import TYPE_CHECKING, Any, NamedTuple, Protocol
 
 import pymupdf
 
-from pseudonymed.dokument.textebene import Seitentext
-from pseudonymed.kern.modell import Art, Fundstelle
+from optdoc.einstellungen import lade_einstellungen
+from optdoc.textebene import Seitentext
 
 if TYPE_CHECKING:
     from rapidocr import RapidOCR
@@ -177,8 +177,6 @@ class TesseractBackend:
         """Locate the program and settle the language packs: the ones given, else the
         configured ones, else whatever of ``deu`` and ``eng`` is installed (``eng`` as
         the last resort).  Raises :class:`OCRFehler` without a program."""
-        from pseudonymed.konfig import lade_einstellungen
-
         self.tabellen = tabellen
         einstellungen = lade_einstellungen()
         gefunden = tesseract_programm(programm or einstellungen.tesseract_pfad or None)
@@ -196,8 +194,6 @@ class TesseractBackend:
     @staticmethod
     def verfuegbar() -> bool:
         """True when a Tesseract program is found (configured path, PATH or usual places)."""
-        from pseudonymed.konfig import lade_einstellungen
-
         return tesseract_programm(lade_einstellungen().tesseract_pfad or None) is not None
 
     def erkenne(self, pix: pymupdf.Pixmap, skala: float) -> list[OCRWort]:
@@ -231,7 +227,7 @@ class TesseractBackend:
         """The second pass: every table grid on the page is read again without its
         rules as one block, and the better reading replaces the words in the grid's box.
         Needs OpenCV; without it the words come back unchanged."""
-        from pseudonymed.dokument import aufbereitung as aufmodul
+        from optdoc import aufbereitung as aufmodul
 
         if not aufmodul.verfuegbar():
             return woerter
@@ -261,7 +257,7 @@ def _gitter_png(ausschnitt: Any, polster: int) -> bytes | None:
     None when OpenCV cannot encode the image."""
     import cv2
 
-    from pseudonymed.dokument import aufbereitung as aufmodul
+    from optdoc import aufbereitung as aufmodul
 
     ohne = aufmodul.ohne_linien(ausschnitt)
     weiss = (255, 255, 255) if ohne.ndim == 3 else 255
@@ -299,6 +295,14 @@ class RapidOCRBackend:
     the installed version or fails on first use."""
 
     name = "rapidocr"
+    # RapidOCR's text-line classifier is meant to turn upside-down lines round before
+    # reading them.  It also turns upright ones: "Medikation: Ramipril 5 mg 1-0-0, ..."
+    # came back as "Mebt t -- t --1 t tn te.." (rapidocr 3.10.0, onnxruntime 1.31 and
+    # 1.32).  Measured on the synthetic report (similarity to the true text, page 1 and
+    # 2): clean 200 dpi 0.936/1.0 with it, 1.0/1.0 without; noisy 150 dpi 0.997/0.856
+    # against 0.997/1.0; never worse without.  So it is off; an upside-down page is a
+    # matter for schaetze_ausrichtung and the plan's rotation.
+    zeilen_drehen = False
 
     def __init__(self, sprache: str | None = "de") -> None:
         """Start the engine for ``sprache`` (a RapidOCR ``lang_type``), else the default."""
@@ -341,13 +345,13 @@ class RapidOCRBackend:
         when it is unsupported or missing, the first page fails and the bundled default
         model takes over for good."""
         try:
-            return self._engine(bild, return_word_box=True)
+            return self._engine(bild, return_word_box=True, use_cls=self.zeilen_drehen)
         except Exception as e:
             if self._standard:
                 raise OCRFehler(f"RapidOCR fehlgeschlagen: {e}") from e
         self._engine = self._RapidOCR(params=self._params)
         self._standard = True
-        return self._engine(bild, return_word_box=True)
+        return self._engine(bild, return_word_box=True, use_cls=self.zeilen_drehen)
 
 
 def _woerter_aus_ergebnis(ergebnis: Any, skala: float) -> list[OCRWort]:
@@ -404,12 +408,11 @@ _BACKEND_NAMEN = ("rapidocr", "tesseract", "aus")
 
 
 def _bevorzugtes_backend(name: str) -> str:
-    """The name "auto" resolved to the configured preference ([ocr] backend,
-    PSEUDONYMED_OCR) when that names an engine or "aus"; any other name unchanged."""
+    """The name "auto" resolved to the configured preference (``OPTDOC_OCR``, or what
+    the calling application set) when that names an engine or "aus"; any other name
+    unchanged."""
     if name != "auto":
         return name
-    from pseudonymed.konfig import lade_einstellungen
-
     bevorzugt = (lade_einstellungen().ocr_backend or "auto").lower()
     return bevorzugt if bevorzugt in _BACKEND_NAMEN else name
 
@@ -429,7 +432,7 @@ def _erstes_verfuegbare(sprachen: str | None, tabellen: bool) -> OCRBackend | No
 def backend(name: str = "auto", sprachen: str | None = None,
             tabellen: bool = True) -> OCRBackend | None:
     """Return the requested backend, or for "auto" the configured preference
-    ([ocr] backend in the configuration file, PSEUDONYMED_OCR), else the first
+    (``OPTDOC_OCR``, or what the calling application set), else the first
     available one; None for "aus".  ``sprachen`` names the language packs:
     "deu+eng" for Tesseract, a RapidOCR language type such as "de" or "latin";
     ``tabellen`` switches Tesseract's second pass for table grids."""
@@ -576,25 +579,37 @@ def _zeile_unlesbar(woerter: list[_Wortlage], mindestanteil: float) -> bool:
     return viele and (unsicher >= 2 or len(woerter) == 1)
 
 
-def _unlesbar_treffer(seite: Seitentext, a: int, b: int) -> Fundstelle:
-    """The hit that blanks the page text ``[a, b)`` of an unreadable line."""
-    return Fundstelle(
-        seite=seite.nummer, start=a, ende=b, text=seite.text[a:b], art=Art.MANUELL,
-        regel="ocr.unlesbar", pseudonym=UNLESBAR,
-        rects=[tuple(r) for r in seite.rects(a, b)],
-        schriftgroesse=seite.schriftgroesse(a, b), quelle="ocr",
+@dataclass
+class UnlesbareZeile:
+    """A line OCR could not read: its page, its span ``[start, ende)`` in the page text,
+    that text, its boxes in page points and the font size the line was set in."""
+
+    seite: int
+    start: int
+    ende: int
+    text: str
+    rects: list[Kasten]
+    schriftgroesse: float
+
+
+def _unlesbare_zeile(seite: Seitentext, a: int, b: int) -> UnlesbareZeile:
+    """The unreadable line covering the page text ``[a, b)``."""
+    return UnlesbareZeile(
+        seite=seite.nummer, start=a, ende=b, text=seite.text[a:b],
+        rects=[tuple(r) for r in seite.rects(a, b)], schriftgroesse=seite.schriftgroesse(a, b),
     )
 
 
-def unlesbare_regionen(seite: Seitentext, mindestanteil: float = 0.4) -> list[Fundstelle]:
-    """Lines OCR could not read (many uncertain words or fragments) as hits to blank.
+def unlesbare_regionen(seite: Seitentext, mindestanteil: float = 0.4) -> list[UnlesbareZeile]:
+    """Lines OCR could not read (many uncertain words or fragments).
 
     What cannot be read cannot be checked: such a line may hold a name, a date
-    or handwriting.  The whole line is covered and marked "[unlesbar]".
+    or handwriting.  A caller decides what to do with it; a pseudonymiser covers
+    the whole line (and may mark it with :data:`UNLESBAR`).
     """
     if seite.quelle != "ocr" or not seite.wortspannen:
         return []
-    return [_unlesbar_treffer(seite, woerter[0].start, woerter[-1].ende)
+    return [_unlesbare_zeile(seite, woerter[0].start, woerter[-1].ende)
             for woerter in _woerter_je_zeile(seite).values()
             if _zeile_unlesbar(woerter, mindestanteil)]
 

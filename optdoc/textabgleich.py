@@ -19,7 +19,7 @@ from itertools import groupby
 
 import pymupdf
 
-from pseudonymed.dokument.textebene import Seitentext
+from optdoc.textebene import Seitentext
 
 _WORT = re.compile(r"\S+")
 _MARKUP = re.compile(r"^[#*_>|`~=-]+$")

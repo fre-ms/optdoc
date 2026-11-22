@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pymupdf
 
-from pseudonymed.dokument.ocr import seitentext_aus_woerter
-from pseudonymed.dokument.textabgleich import (
+from optdoc.ocr import seitentext_aus_woerter
+from optdoc.textabgleich import (
     _geteilte_boxen,
     _hinter_anker,
     _laeufe,

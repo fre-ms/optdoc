@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pymupdf
 
-from pseudonymed.dokument import gliederung as gl
-from pseudonymed.dokument.ocr import OCRWort, seitentext_aus_woerter
-from pseudonymed.dokument.textebene import Seitentext, lese_seite
+from optdoc import gliederung as gl
+from optdoc.ocr import OCRWort, seitentext_aus_woerter
+from optdoc.textebene import Seitentext, lese_seite
 
 
 def _zeile(text: str, x: float, y: float, h: float = 10.0, zeichen: float = 5.0,

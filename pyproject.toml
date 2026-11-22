@@ -1,0 +1,60 @@
+[project]
+name = "optdoc"
+version = "0.0.1"
+description = "Makes photographed and scanned documents legible: straighten, clean up, OCR with word boxes and tables, searchable PDF."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "AGPL-3.0-or-later"
+authors = [{ name = "fre.ms", email = "fre.ms@fre.ms" }]
+keywords = ["ocr", "scan", "document", "dewarp", "deskew", "pdf", "searchable-pdf", "tesseract", "rapidocr"]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Healthcare Industry",
+  "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Topic :: Multimedia :: Graphics :: Capture :: Scanners",
+  "Topic :: Text Processing",
+]
+dependencies = [
+  # <2: PyMuPDF 2.0 (MuPDF 1.28.5) shifts glyphs after a redaction; optdoc's pages are
+  # redacted by PseudonyMed, so both pin the same range
+  "pymupdf>=1.25,<2",
+]
+
+[project.optional-dependencies]
+# RapidOCR brings OpenCV and NumPy, which the clean-up steps need as well
+ocr = ["rapidocr>=3", "onnxruntime>=1.18", "pillow>=10", "pillow-heif>=0.18"]
+
+[project.scripts]
+optdoc = "optdoc.cli:main"
+
+[project.urls]
+Source = "https://github.com/fre-ms/optdoc"
+
+[dependency-groups]
+dev = [
+  "pytest>=8",
+  "pytest-timeout>=2.3",
+  "ruff>=0.6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["optdoc"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+timeout = 900
+timeout_method = "thread"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

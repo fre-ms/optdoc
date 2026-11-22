@@ -535,7 +535,7 @@ def gitterbereiche(bild: Any) -> list[tuple[int, int, int, int]]:
     """Pixel boxes of table grids: connected long horizontal and vertical rules that
     together span at least 15 % of the width and 2 % of the height.  Tesseract's page
     segmentation treats such a grid as graphics and drops the cells; the OCR reads the
-    boxes again without their lines (:class:`~pseudonymed.dokument.ocr.TesseractBackend`)."""
+    boxes again without their lines (:class:`~optdoc.ocr.TesseractBackend`)."""
     import cv2
 
     grau = _grau(bild)
@@ -768,7 +768,13 @@ def np_contig(bild: Any) -> Any:
 def schaetze_ausrichtung(bild: Any, backend: Any = None) -> int:
     """Clockwise rotation in degrees that puts the page upright: 0 or 90 from the text
     lines (rows vary most when lines are horizontal); 0 against 180 only with an OCR
-    backend, which reads both and keeps the one it is more confident about."""
+    backend, which reads both and keeps the one it is more confident about.
+
+    An engine that turns upside-down lines round by itself (RapidOCR's line classifier,
+    off by default in optdoc) reads both ways almost equally well and is asked without
+    it: measured on the
+    synthetic report at 100 dpi, confidence 83 upright against 75 upside down with the
+    classifier, 89 against 16 without; Tesseract 83 against 24."""
     import cv2
     import numpy as np
 
@@ -789,8 +795,14 @@ def schaetze_ausrichtung(bild: Any, backend: Any = None) -> int:
         woerter = backend.erkenne(_np_zu_pixmap(kandidat), 1.0)
         return sum(w.konfidenz for w in woerter if len(w.text.strip()) >= 3)
 
-    if wert(cv2.rotate(klein, cv2.ROTATE_180)) > wert(klein) * 1.15:
-        return (grund + 180) % 360
-    return grund
+    drehen = getattr(backend, "zeilen_drehen", None)
+    if drehen is not None:
+        backend.zeilen_drehen = False
+    try:
+        kopfueber = wert(cv2.rotate(klein, cv2.ROTATE_180)) > wert(klein) * 1.15
+    finally:
+        if drehen is not None:
+            backend.zeilen_drehen = drehen
+    return (grund + 180) % 360 if kopfueber else grund
 
 

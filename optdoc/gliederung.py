@@ -6,7 +6,7 @@ geometry of the lines tells the layout: a line that runs to the right margin goe
 in the next one; a gap taller than the usual line spacing ends a paragraph; a line in
 a larger face, or a short bold line on its own, is a heading; a bullet starts a list
 item; big gaps inside a line (tabs in the page text, see
-:func:`~pseudonymed.dokument.ocr.seitentext_aus_woerter`) are table cells.
+:func:`~optdoc.ocr.seitentext_aus_woerter`) are table cells.
 
 The roles are computed once from the OCR geometry and applied to the page text later,
 raw or with the pseudonyms in place: both have the same lines.  Italics are not
@@ -25,7 +25,7 @@ from typing import Any
 
 import pymupdf
 
-from pseudonymed.dokument.textebene import Box, Seitentext
+from optdoc.textebene import Box, Seitentext
 
 _AUFZAEHLUNG = re.compile(r"^(?:(?P<symbol>[-•·▪◦●○■□*–—>])|(?P<nummer>\d{1,2}[.)])"
                           r"|(?P<buchstabe>[a-zA-Z][.)]))\s+(?=\S)")
