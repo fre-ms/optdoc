@@ -68,6 +68,26 @@ Settings without a configuration file: `OPTDOC_OCR` (the engine `auto` stands fo
 (the program's path), `OPTDOC_TESSERACT_LANGUAGES`. An application that embeds optdoc hands over its own
 with `optdoc.settings.set_settings`.
 
+## Test bench
+
+`optdoc bench <folder>` scores the readings of documents whose content is known. Next to every document lies a
+truth file `<name>.truth.txt`, one line per item as it is printed (`Kalium 5,8 mmol/l 3,5 - 5,1 H`). The answer
+is numbers only (rows found word for word, numbers read right in their own row, rows with every number right,
+similarity, engine confidence), per document and per engine. Documents are named by their position, never by file
+name, and no word of a document or a truth file is printed, not even in an error. So the bench can run on real
+documents on your own computer while only the figures are shared.
+
+Invented laboratory reports to print and photograph:
+
+```
+uv run python bench/lab_reports.py reports/ 6     # reports/lab-01.pdf … and lab-01.truth.txt …
+# print them, photograph each, save the photo as reports/lab-01.jpg (or .heic, .png)
+optdoc bench reports/
+```
+
+On those reports as clean 200-dpi scans RapidOCR reads 99.0 % of the numbers right (Tesseract 95.1 %); tilted by
+2°, noisy and at 150 dpi 96.1 % (Tesseract 63.8 %). That is why every number is to be read twice (see *Planned*).
+
 ## The reading
 
 `<name>.reading.json` (format `optdoc-reading`, version 1) holds, per page, its size in points, where the text

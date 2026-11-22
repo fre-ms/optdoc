@@ -1,8 +1,8 @@
-"""The command line: ``optdoc readers`` and ``optdoc prepare``.
+"""The command line: ``optdoc readers``, ``optdoc prepare`` and ``optdoc bench``.
 
-Both answer in JSON on standard output, so that programs in any language can call
+All answer in JSON on standard output, so that programs in any language can call
 optdoc as a helper.  Errors go to standard error and end with exit status 2; they
-never quote the document.
+never quote the document, and ``bench`` names neither files nor their content.
 """
 
 from __future__ import annotations
@@ -49,9 +49,9 @@ def _prepare(args: argparse.Namespace) -> dict[str, object]:
 
     source: Path = args.file
     if not source.is_file():
-        raise FileNotFoundError(f"no such file: {source}")
+        raise FileNotFoundError("no such file")
     folder = args.out or source.with_name(f"{source.stem}.optdoc")
-    paper = None if args.paper.lower() in ("image", "image") else args.paper
+    paper = None if args.paper.lower() == "image" else args.paper
     reading = read(source, reader=_READERS[args.reader], languages=args.languages,
                   tables=not args.no_tables, paper=paper, plan=_plan(args.plan),
                   clean_up=not args.no_clean_up, with_structure=not args.no_structure)
@@ -67,6 +67,16 @@ def _prepare(args: argparse.Namespace) -> dict[str, object]:
         }
     finally:
         reading.close()
+
+
+def _bench(args: argparse.Namespace) -> dict[str, object]:
+    """Score the documents of a bench folder; numbers only."""
+    from optdoc.bench import bench, documents_in
+
+    if not args.folder.is_dir():
+        raise NotADirectoryError("no such folder")
+    result = bench(args.folder, args.reader, clean_up=not args.no_clean_up).as_dict()
+    return {"documents_found": len(documents_in(args.folder)), **result}
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -87,6 +97,11 @@ def _parser() -> argparse.ArgumentParser:
     pr.add_argument("--no-clean-up", action="store_true", help="no automatic clean-up")
     pr.add_argument("--no-tables", action="store_true", help="no second pass for table grids")
     pr.add_argument("--no-structure", action="store_true", help="raw OCR lines, no Markdown")
+    be = sub.add_parser("bench", help="score readings against truth files (numbers only)")
+    be.add_argument("folder", type=Path, help="documents with a <name>.truth.txt next to each")
+    be.add_argument("--reader", action="append", choices=["rapidocr", "tesseract"],
+                    help="engine to score; repeatable (default: every installed engine)")
+    be.add_argument("--no-clean-up", action="store_true", help="no automatic clean-up")
     return p
 
 
@@ -94,9 +109,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Run the command line; returns the exit status."""
     args = _parser().parse_args(argv)
     try:
-        result = _readers() if args.command == "readers" else _prepare(args)
+        commands = {"readers": lambda: _readers(), "prepare": lambda: _prepare(args),
+                    "bench": lambda: _bench(args)}
+        result = commands[args.command]()
     except (OSError, ValueError, ocrlib.OCRError) as error:
-        print(f"optdoc: {error}", file=sys.stderr)
+        # the bench may run on real documents: not even a message that could quote a path
+        said = type(error).__name__ if args.command == "bench" else str(error)
+        print(f"optdoc: {said}", file=sys.stderr)
         return 2
     json.dump(result, sys.stdout, ensure_ascii=False, indent=1)
     sys.stdout.write("\n")
