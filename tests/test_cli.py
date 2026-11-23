@@ -121,6 +121,22 @@ def test_answer_names_the_results(tmp_path: Path, report: Path,
     assert reading["made_with"] == answer["made_with"]
 
 
+def test_standard_error_is_optdocs_own() -> None:
+    """While a command runs, what libraries write to standard error below Python (ONNX
+    Runtime warns on Linux) and what Python code prints there goes nowhere; optdoc's own
+    lines get through, and afterwards standard error is as before."""
+    code = ("import os, sys\n"
+            "from optdoc.cli import _own_stderr\n"
+            "with _own_stderr() as said:\n"
+            "    os.write(2, b'native noise\\n')\n"
+            "    print('python noise', file=sys.stderr)\n"
+            "    said.write('optdoc\\n')\n"
+            "os.write(2, b'after\\n')\n")
+    run = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                         check=True)
+    assert run.stderr == "optdoc\nafter\n"
+
+
 def test_every_kind_is_worded_alike() -> None:
     """Both languages of a kind fill in the same details."""
     from string import Formatter

@@ -14,13 +14,15 @@ The command line never goes on the network (:mod:`optdoc.offline`).
 from __future__ import annotations
 
 import argparse
+import contextlib
 import importlib.util
 import json
+import os
 import sys
 import warnings
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import Any, NoReturn, TextIO
 
 from optdoc import __version__, cleanup, offline
 from optdoc import ocr as ocrlib
@@ -28,6 +30,7 @@ from optdoc.errors import LANGUAGES, OptdocError
 
 INTERFACE = 1  # the version of docs/interface.md the answers follow
 STATUS_ERROR = 2
+_said: TextIO = sys.stderr  # where optdoc's own lines on standard error go (see _own_stderr)
 
 
 def _heic() -> bool:
@@ -57,8 +60,8 @@ def _plan(path: Path | None) -> dict[int, cleanup.CleanupPlan] | None:
 
 def _progress(page: int, of: int) -> None:
     """One line of progress on standard error: the page about to be done, of how many."""
-    sys.stderr.write(json.dumps({"page": page, "of": of}) + "\n")
-    sys.stderr.flush()
+    _said.write(json.dumps({"page": page, "of": of}) + "\n")
+    _said.flush()
 
 
 def _prepare(args: argparse.Namespace) -> dict[str, Any]:
@@ -102,7 +105,7 @@ class _Parser(argparse.ArgumentParser):
 
     def error(self, message: str) -> NoReturn:
         """Show the usage and fail with kind "usage"."""
-        self.print_usage(sys.stderr)
+        self.print_usage(_said)
         raise OptdocError("usage")
 
 
@@ -159,19 +162,49 @@ def _quiet() -> None:
     pymupdf.TOOLS.mupdf_display_warnings(False)
 
 
+@contextlib.contextmanager
+def _own_stderr() -> Iterator[TextIO]:
+    """Standard error for optdoc's own lines only.  Libraries write to it below Python, where
+    no setting reaches them (ONNX Runtime warned about PCI buses on Linux, in colour); for
+    the time of a command the descriptor points at the null device, and optdoc's lines go
+    through a copy of the real one, which is put back afterwards."""
+    sys.stderr.flush()
+    try:
+        kept = os.dup(2)
+    except OSError:  # no standard error to begin with
+        yield sys.stderr
+        return
+    null = os.open(os.devnull, os.O_WRONLY)
+    os.dup2(null, 2)
+    os.close(null)
+    stream = os.fdopen(os.dup(kept), "w", encoding="utf-8", errors="replace")
+    try:
+        yield stream
+    finally:
+        stream.close()
+        sys.stderr.flush()
+        os.dup2(kept, 2)
+        os.close(kept)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the command line; returns the exit status."""
+    global _said
     offline.no_telemetry()
     offline.forbid_network()
     _quiet()
     try:
-        args = _parser().parse_args(argv)
-        answer, status = COMMANDS[args.command](args), 0
-    except OptdocError as error:
-        answer, status = _failure(error), STATUS_ERROR
-    except Exception as error:  # a fault of optdoc: its message might quote a document
-        answer, status = _failure(OptdocError("internal", error=type(error).__name__)), \
-            STATUS_ERROR
+        with _own_stderr() as _said:
+            try:
+                args = _parser().parse_args(argv)
+                answer, status = COMMANDS[args.command](args), 0
+            except OptdocError as error:
+                answer, status = _failure(error), STATUS_ERROR
+            except Exception as error:  # a fault of optdoc: its message might quote a document
+                answer = _failure(OptdocError("internal", error=type(error).__name__))
+                status = STATUS_ERROR
+    finally:  # --help and --version leave by SystemExit
+        _said = sys.stderr
     head = {"interface": INTERFACE, "made_with": f"optdoc {__version__}"}
     json.dump({**head, **answer}, sys.stdout, ensure_ascii=False, indent=1)
     sys.stdout.write("\n")

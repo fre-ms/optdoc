@@ -21,7 +21,8 @@ optdoc --version
 
 Every command writes **exactly one JSON object to standard output**, whether it succeeds or not,
 and ends with exit status **0** on success and **2** on failure. Standard error is free for
-`--progress` (below); nothing else is written there on purpose. No answer and no message ever
+`--progress` (below) and the usage line of an invalid command line; nothing else reaches it, not
+even what the libraries inside write there (since 0.2.1). No answer and no message ever
 quotes the content of a document or a path given to optdoc, since a file name may name a patient.
 
 Every answer has these two fields:

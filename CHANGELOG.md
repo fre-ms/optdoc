@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1 (2026-11-23)
+
+### Fixed
+
+- Standard error holds optdoc's own lines only, as the interface says: on Linux, ONNX Runtime wrote a
+  warning there (about PCI buses, in colour) between the progress lines. For the time of a command,
+  what libraries write to standard error is discarded; the progress lines and the usage line get
+  through.
+
 ## 0.2.0 (2026-11-23)
 
 ### Added

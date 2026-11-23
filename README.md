@@ -12,7 +12,7 @@ which pseudonymises patient documents, and medorello, a records app that files d
 values from them, such as the results printed on a photographed laboratory report. optdoc itself knows
 nothing about either and works on any kind of document.
 
-**Status: pre-alpha (0.2.0).** The code comes from PseudonyMed, where it has been tested for weeks, with its
+**Status: pre-alpha (0.2.1).** The code comes from PseudonyMed, where it has been tested for weeks, with its
 history. Since 0.1.0 its identifiers are English (`docs/renames-0.1.0.md` lists the old German names); since
 0.2.0 its command line is a described interface ([docs/interface.md](docs/interface.md)) and it can be built
 as a standalone program ([docs/sidecar.md](docs/sidecar.md)). `CHANGELOG.md` lists the changes.
