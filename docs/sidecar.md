@@ -30,7 +30,7 @@ empty folders (they must stay empty); a failure (it must answer with its kind); 
 `prepare` once more with the network closed by the system (`sandbox-exec`). It ends with a
 summary: size, checksum, timings, checks. `--no-check` builds only.
 
-Built on macOS 27 (Apple M1 Max) with optdoc 0.2.1, Python 3.13, PyInstaller 6.22:
+Built on macOS 27 (Apple M1 Max) with optdoc 0.3.0, Python 3.13, PyInstaller 6.22:
 
 | | one file (default) | folder (`--onedir`) |
 |---|---|---|

@@ -8,7 +8,7 @@ Every answer carries `interface`. It goes up when something a caller relies on c
 that breaks it: a field or a kind of error removed or renamed, a meaning changed. Within one
 interface, new fields, new options and new kinds of error may come; a caller ignores fields it
 does not know and treats an unknown kind of error like any other (its message says what
-happened). Releases are tagged (`v0.2.1`); pin a tag, not a branch.
+happened). Releases are tagged (`v0.3.0`); pin a tag, not a branch.
 
 ## Calling
 
@@ -30,19 +30,19 @@ Every answer has these two fields:
 | field | example | meaning |
 |---|---|---|
 | `interface` | `1` | the version of this description |
-| `made_with` | `"optdoc 0.2.1"` | the program and its version, for the record of what made a file |
+| `made_with` | `"optdoc 0.3.0"` | the program and its version, for the record of what made a file |
 
 ## `readers`: what this installation can do
 
 ```json
-{"interface": 1, "made_with": "optdoc 0.2.1", "version": "0.2.1",
+{"interface": 1, "made_with": "optdoc 0.3.0", "version": "0.3.0",
  "readers": ["rapidocr", "tesseract"], "clean_up": true, "heic": true, "tables": true}
 ```
 
 `readers` lists the OCR engines found, in order of preference (`rapidocr` comes inside the
 standalone program; `tesseract` is listed where the system has it). `clean_up` says whether the
 clean-up steps are there (OpenCV), `heic` whether HEIC and HEIF photos can be opened, `tables`
-whether tables are found with their cells (Camelot, the extra "tables"; since 0.2.1). The engines
+whether tables are found with their cells (Camelot, the extra "tables"; since 0.3.0). The engines
 are not loaded for this, so the answer is quick (0.2 s for the standalone program as a folder,
 3 s as one file, which unpacks itself first).
 
@@ -72,7 +72,7 @@ file.
 The answer:
 
 ```json
-{"interface": 1, "made_with": "optdoc 0.2.1",
+{"interface": 1, "made_with": "optdoc 0.3.0",
  "pdf": "<folder>/<stem>.pdf", "reading": "<folder>/<stem>.reading.json",
  "markdown": "<folder>/<stem>.md", "plan": "<folder>/<stem>.plan.json",
  "pages": 2, "ocr_pages": [1, 2], "pages_without_text": [], "cleaned_up": [1, 2],
@@ -83,7 +83,7 @@ Pages are counted from 1. `ocr_pages` were read by OCR (the others had a text la
 `pages_without_text` hold no text at all afterwards (no layer, no engine, or nothing legible),
 `cleaned_up` were changed by the clean-up, `reader` is the engine used (`null` without one),
 `tables` the number of tables found with their cells (`null` when they were not looked for:
-`--no-cells`, or the extra "tables" is not installed, or Camelot failed; since 0.2.1).
+`--no-cells`, or the extra "tables" is not installed, or Camelot failed; since 0.3.0).
 
 **Tables.** The tables of every page, with their cells, go into the reading (below); a laboratory
 result then is a row of cells (name, value, unit, range, flag) rather than a line to take apart.
@@ -122,7 +122,7 @@ wants the system to make sure may run optdoc under
 ## Failures
 
 ```json
-{"interface": 1, "made_with": "optdoc 0.2.1", "error": "unsupported",
+{"interface": 1, "made_with": "optdoc 0.3.0", "error": "unsupported",
  "details": {"suffix": ".docx"},
  "message": {"en": "optdoc cannot open files of type .docx.",
              "de": "Dateien vom Typ .docx kann optdoc nicht öffnen."}}
@@ -156,7 +156,7 @@ The same kinds and wording are there for programs that use optdoc as a Python li
 ## The reading: `optdoc-reading`, version 1
 
 ```json
-{"format": "optdoc-reading", "version": 1, "made_with": "optdoc 0.2.1",
+{"format": "optdoc-reading", "version": 1, "made_with": "optdoc 0.3.0",
  "reader": "rapidocr", "source": "<file name>", "plan": {"1": {"…": "…"}},
  "pages": [{"page": 1, "width": 595.28, "height": 841.89, "source": "ocr",
             "text": "Kalium\t5,8\tmmol/l\t3,5 - 5,1\tH\n…", "markdown": "…",
@@ -175,7 +175,7 @@ carry the engine's `confidence` (0 to 1). In the text, a line of the page is a l
 read by OCR, a gap wider than the words are high (between the cells of a table, or columns) is a
 tab. `plan` is the content of `<stem>.plan.json`.
 
-`tables` (since 0.2.1) lists the tables of the page, top to bottom, each with its `box`, Camelot's
+`tables` (since 0.3.0) lists the tables of the page, top to bottom, each with its `box`, Camelot's
 `confidence` in it (0 to 1) and its `rows`, top to bottom, each a list of cells from left to
 right: `text` (spaces collapsed; empty for an empty cell or one another cell spans) and `box`, in
 the same points as the words. Every row is given once, even where Camelot found a table twice.

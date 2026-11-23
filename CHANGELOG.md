@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.1 (2026-11-23)
+## 0.3.0 (2026-11-23)
 
 ### Added
 
@@ -27,6 +27,13 @@
   their Markdown now has tables.
 - The build of the standalone program switches off ONNX Runtime's telemetry for PyInstaller as well,
   which loads the library to collect it.
+
+### Fixed
+
+- The PDF is let go once its tables are found: Camelot's objects held it open until a garbage
+  collection, and Windows cannot delete an open file.
+
+## 0.2.1 (2026-11-23)
 
 ### Fixed
 
