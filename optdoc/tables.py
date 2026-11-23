@@ -37,6 +37,7 @@ memory and writes no file anywhere else (checked with an empty temporary folder)
 
 from __future__ import annotations
 
+import gc
 import importlib.util
 import warnings
 from dataclasses import dataclass, field
@@ -157,4 +158,8 @@ def find_tables(pdf: str | Path) -> dict[int, list[Table]]:
             table = _table(each, doc[number])
             if table is not None:
                 tables.setdefault(number, []).append(table)
+    # Camelot's objects hold the PDF open in reference cycles until a garbage collection;
+    # an open file cannot be deleted or replaced on Windows
+    found = each = None
+    gc.collect()
     return {number: _distinct(page_tables) for number, page_tables in tables.items()}

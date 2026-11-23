@@ -5,6 +5,8 @@ each table once; the cells where the words are."""
 from __future__ import annotations
 
 import json
+import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -38,6 +40,22 @@ def test_born_digital_reports(tmp_path: Path, layout: int) -> None:
     assert list(found) == [0] and len(found[0]) == 1
     score = score_tables(_cells(pdf), _texts(found))
     assert score.table_rows_exact == score.table_rows == 18
+
+
+def test_pdf_is_let_go(tmp_path: Path) -> None:
+    """Once the tables are found, the PDF is closed again: on Windows a file still open
+    cannot be deleted, and the bench removes its working copies."""
+    pdf, _ = lab_report(tmp_path, 1)
+    find_tables(pdf)
+    moved = pdf.rename(tmp_path / "moved.pdf")  # Windows refuses for an open file, too
+    moved.unlink()
+    assert not moved.exists()
+    if sys.platform != "win32":
+        import subprocess
+
+        held = subprocess.run(["lsof", "-p", str(os.getpid())], capture_output=True,
+                              text=True, check=False).stdout
+        assert "lab-01.pdf" not in held and "moved.pdf" not in held
 
 
 @needs_backend
