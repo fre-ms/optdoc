@@ -1,4 +1,4 @@
-"""The results of a reading: searchable PDF, reading as JSON, Markdown, plan."""
+"""The results of a reading: searchable PDF, reading as JSON, Markdown, configuration."""
 
 from __future__ import annotations
 
@@ -21,7 +21,8 @@ needs_backend = pytest.mark.skipif(not ocrlib.available_backends(),
 @needs_backend
 def test_scan_becomes_searchable(tmp_path: Path, report: Path) -> None:
     """The scan comes back with an invisible text layer on the printed words, the
-    reading names every word with its box, the plan can be given back."""
+    reading names every word with its box and who wrote it, the configuration carries the
+    plan."""
     source = scan(report, tmp_path / "scan.pdf", rotation=2.0)
     reading = read(source)
     try:
@@ -45,9 +46,10 @@ def test_scan_becomes_searchable(tmp_path: Path, report: Path) -> None:
     assert len(word["box"]) == 4 and 0 < word["confidence"] <= 1
     assert json_page["text"][word["start"]:word["end"]] == "Diagnosen:"
     assert "## Page 2" in paths["markdown"].read_text(encoding="utf-8")
-    plan = json.loads(paths["plan"].read_text(encoding="utf-8"))
-    assert plan["1"]["straighten"] is True
-    assert reading_json["plan"] == plan
+    config = json.loads(paths["config"].read_text(encoding="utf-8"))
+    assert config["pages"][0]["plan"]["straighten"] is True
+    assert reading_json["plan"]["1"] == config["pages"][0]["plan"]
+    assert word["by"] == "ocr"
 
 
 def test_text_layer_stays_as_it_is(tmp_path: Path, report: Path) -> None:

@@ -67,10 +67,20 @@ def _box(page_text: PageText, a: int, b: int) -> pymupdf.Rect | None:
 
 def text_layer_from_correction(text: str, ocr: PageText) -> PageText:
     """A page text whose string is ``text`` and whose boxes come from ``ocr``."""
+    return align_correction(text, ocr)[0]
+
+
+def align_correction(text: str, ocr: PageText) -> tuple[PageText, list[bool]]:
+    """:func:`text_layer_from_correction`, and for every word of the result whether a
+    person wrote it: True for a word that is not the OCR word it lies on (changed,
+    added, or split from one), False for one the person left as it was read, which keeps
+    the engine's confidence."""
     tokens = _word_spans(text)
-    boxes = _aligned_boxes(text, tokens, ocr)
+    boxes, kept = _aligned_boxes(text, tokens, ocr)
     _place_rest(tokens, boxes, ocr)
-    return _page_text(text, tokens, boxes, ocr)
+    page_text = _page_text(text, tokens, boxes, ocr, kept)
+    written = [k for k, r in enumerate(boxes) if r is not None and not r.is_empty]
+    return page_text, [kept[k] is None for k in written]
 
 
 def _word_spans(text: str) -> list[tuple[int, int]]:
@@ -87,11 +97,22 @@ def _word_spans(text: str) -> list[tuple[int, int]]:
     return spans
 
 
-def _ocr_words(ocr: PageText) -> tuple[list[str], list[pymupdf.Rect]]:
-    """Comparison keys and boxes of the OCR words that have a printed box."""
-    pairs = [(_key(ocr.text[a:b]), _box(ocr, a, b)) for a, b in ocr.words()]
-    valid = [(s, r) for s, r in pairs if r is not None and not r.is_empty]
-    return [s for s, _ in valid], [r for _, r in valid]
+def _ocr_words(ocr: PageText) -> tuple[list[str], list[pymupdf.Rect],
+                                          list[tuple[str, float]]]:
+    """Comparison keys, boxes, and text with confidence of the OCR words that have a
+    printed box."""
+    spans = ocr.words()
+    confidences = ocr.confidences if len(ocr.confidences) == len(spans) else [1.0] * len(spans)
+    keys: list[str] = []
+    boxes: list[pymupdf.Rect] = []
+    words: list[tuple[str, float]] = []
+    for (a, b), c in zip(spans, confidences, strict=True):
+        box = _box(ocr, a, b)
+        if box is not None and not box.is_empty:
+            keys.append(_key(ocr.text[a:b]))
+            boxes.append(box)
+            words.append((ocr.text[a:b], c))
+    return keys, boxes, words
 
 
 def _word_lengths(tokens: list[tuple[int, int]], indices: range | list[int]) -> list[int]:
@@ -101,21 +122,27 @@ def _word_lengths(tokens: list[tuple[int, int]], indices: range | list[int]) -> 
 
 def _aligned_boxes(
     text: str, tokens: list[tuple[int, int]], ocr: PageText
-) -> list[pymupdf.Rect | None]:
+) -> tuple[list[pymupdf.Rect | None], list[float | None]]:
     """A box for every word with an OCR counterpart (longest common subsequence of the
     comparison keys), ``None`` for the rest; a replaced stretch shares out the boxes of
-    the OCR words it replaces."""
+    the OCR words it replaces.  Beside it, the OCR confidence of every word that is the
+    OCR word unchanged (character for character), ``None`` for every other."""
     key_text = [_key(text[a:b]) for a, b in tokens]
-    key_ocr, ocr_boxes = _ocr_words(ocr)
+    key_ocr, ocr_boxes, ocr_words = _ocr_words(ocr)
     boxes: list[pymupdf.Rect | None] = [None] * len(tokens)
+    kept: list[float | None] = [None] * len(tokens)
     sm = difflib.SequenceMatcher(None, key_text, key_ocr, autojunk=False)
     for tag, i1, i2, j1, j2 in sm.get_opcodes():
         if tag == "equal":
             boxes[i1:i2] = ocr_boxes[j1:j2]
+            for i, j in zip(range(i1, i2), range(j1, j2), strict=True):
+                word, confidence = ocr_words[j]
+                a, b = tokens[i]
+                kept[i] = confidence if text[a:b] == word else None
         elif tag == "replace":
             lengths = _word_lengths(tokens, range(i1, i2))
             boxes[i1:i2] = _shared_boxes(lengths, ocr_boxes[j1:j2])
-    return boxes
+    return boxes, kept
 
 
 def _shared_boxes(lengths: list[int], ocr_boxes: list[pymupdf.Rect]) -> list[pymupdf.Rect]:
@@ -248,10 +275,12 @@ def _line_height(boxes: list[pymupdf.Rect | None]) -> float:
 
 
 def _page_text(
-    text: str, tokens: list[tuple[int, int]], boxes: list[pymupdf.Rect | None], ocr: PageText
+    text: str, tokens: list[tuple[int, int]], boxes: list[pymupdf.Rect | None], ocr: PageText,
+    kept: list[float | None] | None = None,
 ) -> PageText:
     """The page text: every word's box shared out over its characters, lines counted
-    from the newlines of ``text``, line boxes and word spans as the OCR page has them."""
+    from the newlines of ``text``, line boxes and word spans as the OCR page has them;
+    a word left as it was read keeps its confidence, every other has 1."""
     n = len(text)
     page_text = PageText(number=ocr.number, width=ocr.width, height=ocr.height, text=text,
                        source="ocr")
@@ -265,7 +294,8 @@ def _page_text(
         if c == "\n":
             line += 1
     page_text.lines = lines
-    for (a, b), r in zip(tokens, boxes, strict=True):
+    kept = kept if kept is not None else [None] * len(tokens)
+    for (a, b), r, confidence in zip(tokens, boxes, kept, strict=True):
         if r is None or r.is_empty:
             continue
         step = r.width / max(1, b - a)
@@ -278,5 +308,5 @@ def _page_text(
         page_text.line_boxes[z] = (r.x0, r.y0, r.x1, r.y1) if old is None else (
             min(old[0], r.x0), min(old[1], r.y0), max(old[2], r.x1), max(old[3], r.y1))
         page_text.word_spans.append((a, b))
-        page_text.confidences.append(1.0)
+        page_text.confidences.append(1.0 if confidence is None else confidence)
     return page_text

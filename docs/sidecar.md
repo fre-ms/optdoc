@@ -2,8 +2,9 @@
 
 For an application that ships optdoc beside it rather than inside it (medorello, as a Tauri
 sidecar): one program with everything in it, Python, PyMuPDF, OpenCV, ONNX Runtime, RapidOCR with
-its models, pillow-heif, Camelot with pandas and pdfium for the tables. It needs no Python on the computer, loads nothing at run time and never
-goes on the network. The application talks to it through the command line described in
+its models, pillow-heif, Camelot with pandas and pdfium for the tables, PySide6 (Qt Widgets) for
+the window. It needs no Python on the computer, loads nothing at run time and never goes on the
+network. The application talks to it through the command line described in
 [interface.md](interface.md).
 
 ## Build
@@ -12,7 +13,7 @@ On the computer the program is for (PyInstaller does not cross-build), from a ch
 the application pins:
 
 ```
-uv sync --extra ocr --extra tables --group build
+uv sync --extra ocr --extra tables --extra gui --group build
 uv run python packaging/build.py
 ```
 
@@ -25,22 +26,26 @@ This writes into `dist/`:
 | `optdoc-<target>.licences.json` | the packages inside, with versions and licences |
 
 and then tries the program out the way an application uses it: `readers`; `prepare` on an
-invented photographed laboratory report (its table must be found) with the temporary, home and cache folders pointed at
-empty folders (they must stay empty); a failure (it must answer with its kind); on macOS
-`prepare` once more with the network closed by the system (`sandbox-exec`). It ends with a
-summary: size, checksum, timings, checks. `--no-check` builds only.
+invented photographed laboratory report (its table must be found) with the temporary, home and
+cache folders pointed at empty folders (they must stay empty); `prepare --config` with the
+configuration it wrote (the same four files, byte for byte); `edit --self-test`, which goes
+through the window without a person, off screen (the same files again, nothing left behind); a
+failure (it must answer with its kind); on macOS `prepare` and the window once more with the
+network closed by the system (`sandbox-exec`). It ends with a summary: size, checksum, timings,
+checks. `--no-check` builds only.
 
-Built on macOS 27 (Apple M1 Max) with optdoc 0.3.0, Python 3.13, PyInstaller 6.22:
+Built on macOS 27 (Apple M1 Max) with optdoc 0.4.0, Python 3.13, PyInstaller 6.22:
 
 | | one file (default) | folder (`--onedir`) |
 |---|---|---|
-| size | 142 MB | 400 MB |
-| `optdoc readers` | 3.0 s | 0.2 s |
-| `optdoc prepare` on a photographed one-page report | 12.5 s | 4.1 s |
-| the same with `--no-cells` (no tables) | 8.6 s | 3.5 s |
+| size | 162 MB | 506 MB |
+| `optdoc readers` | 3.7 s | 0.25 s |
+| `optdoc prepare` on a photographed one-page report | 13.9 s | 4.6 s |
+| the same with `--no-cells` (no tables) | 9.7 s | 3.9 s |
+| `optdoc edit --self-test` on it (window open to closed, without a person) | 16.2 s | 5.5 s |
 
-Times are the mean of three runs; the first run after building or copying the program takes
-longer (14 s and 11 s). The one file unpacks itself into the temporary folder at every start (and
+Times are the mean of three runs; the first run after building or copying the program, or after a
+while unused, takes longer (up to 27 s as one file). The one file unpacks itself into the temporary folder at every start (and
 removes that copy at exit); that is where the difference goes. The folder starts at once. Both
 pass the same checks.
 
@@ -61,9 +66,19 @@ application's resources (`bundle.resources`) and start
 `<resources>/optdoc-aarch64-apple-darwin-onedir/optdoc` from Rust with `std::process::Command`. Every library in it has to be signed for notarisation;
 the build signs them all when given an identity (below).
 
-Either way: give `prepare` an empty folder of its own for `--out`, read the answer from standard
-output (always one JSON object; status 0 or 2), and with `--progress` read standard error line by
-line for `{"page": n, "of": m}`.
+Either way: give `prepare` and `edit` an empty folder of its own for `--out`, read the answer from
+standard output (always one JSON object; status 0 or 2), and with `--progress` read standard error
+line by line for `{"page": n, "of": m}`. `edit` returns when the person closes the window, which may
+take as long as they work: give it no time limit, and treat the error `cancelled` as no error. The
+window asks to be brought to the front when it opens; whether macOS lets it come forward when another
+application starts it has not been tried yet. With one file it appears after the unpacking, some
+seconds after the start (the folder is quicker).
+
+Tauri signs an `externalBin` again when it bundles the application, by default with the hardened
+runtime (`bundle.macOS.hardenedRuntime`) and without optdoc's entitlements. The one file then does
+not start: the system refuses the Python library it unpacks ("different Team IDs"). Either bundle
+without the hardened runtime, or sign the program again after Tauri, with the hardened runtime and
+`packaging/entitlements.plist`.
 
 ## Signing and notarising (macOS)
 
@@ -92,5 +107,6 @@ and tried so far only on macOS.
 optdoc is AGPL-3.0-or-later, and so is PyMuPDF. The program carries further packages under
 permissive licences (`optdoc-<target>.licences.json` lists them) and native libraries with their
 own: OpenCV brings FFmpeg (LGPL), pillow-heif brings libheif and libde265 (LGPL) and x265 (GPL 2.0
-or later), pypdfium2 brings pdfium (Apache 2.0 and BSD). An application that ships the program names optdoc, its licence and where its source
+or later), pypdfium2 brings pdfium (Apache 2.0 and BSD), PySide6 brings Qt (LGPL 3.0; its libraries
+are loaded from the program's own files and can be replaced). An application that ships the program names optdoc, its licence and where its source
 is (https://github.com/fre-ms/optdoc, the tag it pins).

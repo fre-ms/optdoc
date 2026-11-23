@@ -625,17 +625,26 @@ def _filtered(pix: pymupdf.Pixmap, filter_: Callable[[Any], Any]) -> pymupdf.Pix
     return pymupdf.Pixmap(pymupdf.csRGB, image.shape[1], image.shape[0], image.tobytes(), False)
 
 
-def recognise_page(page: pymupdf.Page, backend_: OCRBackend, number: int | None = None,
-                  dpi: int = OCR_DPI, preprocessing: bool = True,
-                  max_pixel: int = MAX_PIXELS, filter_=None) -> PageText:
-    """OCR of one page.  ``filter_`` (NumPy BGR image -> image) runs on the rendering
-    before the engine, for the letter-aware finish of upscaled pages."""
+def recognise_words(page: pymupdf.Page, backend_: OCRBackend, dpi: int = OCR_DPI,
+                    preprocessing: bool = True, max_pixel: int = MAX_PIXELS,
+                    filter_: Callable[[Any], Any] | None = None) -> list[OCRWord]:
+    """The words OCR reads on one page, boxes in page points.  ``filter_`` (NumPy BGR
+    image -> image) runs on the rendering before the engine, for the letter-aware finish
+    of upscaled pages."""
     pix, scale = _render(page, dpi, max_pixel)
     if preprocessing:
         pix = preprocess(pix)
     if filter_ is not None:
         pix = _filtered(pix, filter_)
-    words = backend_.recognise(pix, scale)
+    return backend_.recognise(pix, scale)
+
+
+def recognise_page(page: pymupdf.Page, backend_: OCRBackend, number: int | None = None,
+                  dpi: int = OCR_DPI, preprocessing: bool = True,
+                  max_pixel: int = MAX_PIXELS,
+                  filter_: Callable[[Any], Any] | None = None) -> PageText:
+    """OCR of one page as a page text (:func:`recognise_words`)."""
+    words = recognise_words(page, backend_, dpi, preprocessing, max_pixel, filter_)
     number = page.number if number is None else number
     return page_text_from_words(words, number, page.rect.width, page.rect.height)
 

@@ -12,10 +12,12 @@ which pseudonymises patient documents, and medorello, a records app that files d
 values from them, such as the results printed on a photographed laboratory report. optdoc itself knows
 nothing about either and works on any kind of document.
 
-**Status: pre-alpha (0.3.0).** The code comes from PseudonyMed, where it has been tested for weeks, with its
+**Status: pre-alpha (0.4.0).** The code comes from PseudonyMed, where it has been tested for weeks, with its
 history. Since 0.1.0 its identifiers are English (`docs/renames-0.1.0.md` lists the old German names); since
 0.2.0 its command line is a described interface ([docs/interface.md](docs/interface.md)) and it can be built
-as a standalone program ([docs/sidecar.md](docs/sidecar.md)). `CHANGELOG.md` lists the changes.
+as a standalone program ([docs/sidecar.md](docs/sidecar.md)); since 0.4.0 it has a window to correct the
+clean-up and the text by hand, and a configuration from which a result can be made again, byte for byte.
+`CHANGELOG.md` lists the changes.
 
 ## What it does today
 
@@ -26,8 +28,7 @@ as a standalone program ([docs/sidecar.md](docs/sidecar.md)). `CHANGELOG.md` lis
   photographed sheet (finds its corners; tells a photographed page from a scanned one by the page itself,
   also inside a PDF of bound photos, and never cuts a scan to the frame of a table), straightening, rotation by quarter turns, dark scanner borders,
   coloured ink (stamps, highlighter), noise, contrast, sharpening, uneven background, ruled and table lines,
-  upscaling for low-resolution images, masks. Every step can be switched and tuned; the plan is written
-  out so that the same result can be made again.
+  upscaling for low-resolution images, masks. Every step can be switched and tuned.
 - **Reads** with [RapidOCR](https://github.com/RapidAI/RapidOCR) (ONNX models in the wheel, no download) or
   [Tesseract](https://github.com/tesseract-ocr/tesseract), with real word boxes and confidences. Tables with
   ruled grids, which Tesseract's page segmentation tends to drop, are read a second time without their lines.
@@ -40,7 +41,15 @@ as a standalone program ([docs/sidecar.md](docs/sidecar.md)). `CHANGELOG.md` lis
 - **Writes** a searchable PDF (the cleaned-up pages with the recognised words laid invisibly over the printed
   ones, line by line, so that selecting a word in a reader covers it and a program that takes the text out
   gets a row of a table as one line; every character as read, "≤" and "↑" too), the reading as JSON, the
-  text as Markdown, and the clean-up plan.
+  text as Markdown, and the configuration.
+- **Lets a person correct it** in a window (extra `gui`, Qt): the clean-up of every page before and after,
+  each step switchable, and the text read by OCR beside the page, uncertain words marked, to be corrected
+  by hand. A correction reaches the PDF's text layer, the reading and the Markdown. The work can be saved
+  and taken up again later.
+- **Makes the same result again.** The configuration (`<name>.optdoc.json`, also inside the PDF) holds
+  every setting, the clean-up of every page, the words OCR read and the person's corrections, and nothing
+  else (no paths, no times). The same file with the same configuration gives the same four files, byte for
+  byte.
 
 Decisions in the clean-up are measured, not guessed: binarising a page (Sauvola) looked good and made
 RapidOCR nearly blind, so optdoc does not do it; straightening a noisy scan by less than about one degree
@@ -53,12 +62,12 @@ Python 3.12 or later, with [uv](https://docs.astral.sh/uv/):
 ```
 git clone https://github.com/fre-ms/optdoc
 cd optdoc
-uv sync --extra ocr --extra tables
+uv sync --extra ocr --extra tables --extra gui
 ```
 
 The `ocr` extra brings RapidOCR, ONNX Runtime, OpenCV and NumPy (for the clean-up steps) and HEIC support;
 the `tables` extra brings [Camelot](https://github.com/camelot-dev/camelot), which finds tables with their
-cells.
+cells; the `gui` extra brings PySide6 (Qt, LGPL 3.0) for the window.
 Tesseract is optional and installed separately (`brew install tesseract tesseract-lang`,
 `apt install tesseract-ocr tesseract-ocr-deu`).
 
@@ -67,14 +76,18 @@ Tesseract is optional and installed separately (`brew install tesseract tesserac
 ```
 optdoc readers
 optdoc prepare photo.heic --out results/
-optdoc prepare scan.pdf --reader tesseract --languages deu+eng --plan results/scan.plan.json
+optdoc prepare scan.pdf --reader tesseract --languages deu+eng
+optdoc edit scan.pdf --out results/ --language en
+optdoc edit scan.pdf --out results/ --config results/scan.optdoc.json
 ```
 
-`prepare` writes `<name>.pdf`, `<name>.reading.json`, `<name>.md` and `<name>.plan.json` into the folder
-given and nowhere else. Every command answers with one JSON object on standard output, so that programs in
+`prepare` writes `<name>.pdf`, `<name>.reading.json`, `<name>.md` and `<name>.optdoc.json` into the folder
+given and nowhere else. `edit` opens the window; *Apply* writes the same four files, *Save and continue
+later* the configuration alone, *Cancel* nothing. `--config` (a `<name>.optdoc.json` or a PDF optdoc wrote)
+starts from a configuration instead of optdoc's suggestions, for `prepare` and `edit` alike. Every command answers with one JSON object on standard output, so that programs in
 any language can use optdoc as a helper; a failure too, with a fixed kind and its message in English and
 German, and exit status 2. No answer quotes a document or its path. Options: `--reader
-auto|rapidocr|tesseract|none`, `--languages`, `--paper a4|a5|a3|letter|legal|image`, `--plan`, `--photo` or
+auto|rapidocr|tesseract|none`, `--languages`, `--paper a4|a5|a3|letter|legal|image`, `--config`, `--photo` or
 `--scan` (instead of telling by each page), `--no-clean-up`, `--no-tables`, `--no-structure`, `--no-cells`
 (no tables with their cells), `--progress` (a line of JSON per page on standard error). [docs/interface.md](docs/interface.md) describes the answers,
 the kinds of error and the reading.
@@ -87,7 +100,7 @@ with `optdoc.settings.set_settings`.
 
 `uv run python packaging/build.py` builds optdoc as one program with everything in it (Python, the OCR
 models, Camelot and all), named the way Tauri wants a sidecar (`optdoc-aarch64-apple-darwin`), and tries it
-out: 142 MB as one file, or a faster-starting folder with `--onedir`. See [docs/sidecar.md](docs/sidecar.md).
+out: 162 MB as one file (the window included), or a faster-starting folder with `--onedir`. See [docs/sidecar.md](docs/sidecar.md).
 
 ## Test bench
 
@@ -117,7 +130,8 @@ writes it), the bench scores its tables as well: rows cut into the right cells, 
 `<name>.reading.json` (format `optdoc-reading`, version 1) holds, per page, its size in points, where the text
 came from (`text` layer or `ocr`), the text, its Markdown, and every word with its offsets in the text, its box
 in points from the top left of the page as shown and, for OCR, the engine's confidence, and the page's
-tables with their cells. It also names the engine, the optdoc version and the plan.
+tables with their cells. It also names the engine, the optdoc version and the clean-up plans; a word a
+person wrote in the window is marked as theirs.
 
 ## In Python
 
@@ -133,6 +147,24 @@ finally:
     reading.close()
 ```
 
+To keep the work, or to change it before the result is made, open a project:
+
+```python
+from optdoc import output
+from optdoc.project import Project, load_config
+
+project = Project.open("photo.heic")            # or config=load_config("results/photo.optdoc.json")
+try:
+    project.set_correction(0, project.text(0).replace("U/I", "U/l"))
+    reading = project.build()
+    try:
+        output.write(reading, "results")        # the configuration is written with it
+    finally:
+        reading.close()
+finally:
+    project.close()
+```
+
 Errors are `optdoc.errors.OptdocError` with a `kind` and `details`; `optdoc.errors.describe_error(error, "de")`
 words one in German, `"en"` in English.
 
@@ -142,7 +174,6 @@ words one in German, `"en"` in English.
 - Flattening curved pages (a book, a folded letter), finding the page in a photo more robustly, and
   turning an upside-down page in the automatic suggestion.
 - Two independent readings of every number, so that a value is only trusted where both agree.
-- A window to correct the clean-up and the reading by hand.
 - A test bench of photographed documents with known content, to measure each step.
 
 ## Licence

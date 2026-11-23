@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -9,6 +10,11 @@ import pytest
 
 from optdoc.settings import set_settings
 from tests.synthetic import make_report
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """The window's tests draw without a screen."""
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
 @pytest.fixture

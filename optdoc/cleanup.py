@@ -88,12 +88,12 @@ class CleanupPlan:
     def from_dict(cls, d: dict[str, Any]) -> CleanupPlan:
         """The plan from a :meth:`full_dict` dictionary; keys that are no field are ignored.
         A value of the wrong kind or out of its range raises an
-        :class:`~optdoc.errors.OptdocError` of kind "bad-plan"."""
+        :class:`~optdoc.errors.OptdocError` of kind "bad-config"."""
         if not isinstance(d, dict):
-            raise OptdocError("bad-plan", reason="json")
+            raise OptdocError("bad-config", reason="json")
         kept = {k: v for k, v in d.items() if k in cls.__dataclass_fields__}
         if not all(_fits(k, v) for k, v in kept.items()):
-            raise OptdocError("bad-plan", reason="field")
+            raise OptdocError("bad-config", reason="field")
         if kept.get("corners") is not None:
             kept["corners"] = [tuple(e) for e in kept["corners"]]
         kept["masks"] = [tuple(m) for m in kept.get("masks", [])]
@@ -821,22 +821,35 @@ def _process(page: pymupdf.Page, a: CleanupPlan, dpi: int,
     return out, width, new_scale
 
 
+def cleaned_image(page: pymupdf.Page, a: CleanupPlan, dpi: int = 300) -> tuple[bytes, float, float]:
+    """The page cleaned up by ``a`` as PNG, and the width and height in points of the
+    page that shows it: the width of the page (of its other side after a quarter turn),
+    the height following the image."""
+    # upscaling is not baked into the page (no information gained, the file would bloat);
+    # the pipeline renders such pages for OCR at the higher resolution instead
+    out, width, new_scale = _process(page, a, dpi, with_upscaling=False)
+    return as_png(out), width, out.shape[0] / new_scale
+
+
+def put_page_image(doc: pymupdf.Document, number: int, png: bytes, width: float,
+                   height: float) -> None:
+    """Replace page ``number`` of ``doc`` by a page of ``width`` × ``height`` points
+    showing ``png``."""
+    new = doc.new_page(pno=number, width=width, height=height)
+    new.insert_image(new.rect, stream=png)
+    doc.delete_page(number + 1)
+
+
 def replace_pages(docs: list[pymupdf.Document], number: int, a: CleanupPlan,
                     dpi: int = 300) -> float:
     """Replace page ``number`` in every document of ``docs`` (copies of the same file)
     by its processed image, rendered once from the first.  The page keeps its width
     in points; the height follows the image.  Returns the pixels per point of the
     new page."""
-    # upscaling is not baked into the page (no information gained, the file would bloat);
-    # the pipeline renders such pages for OCR at the higher resolution instead
-    out, width, new_scale = _process(docs[0][number], a, dpi, with_upscaling=False)
-    png = as_png(out)
-    height = out.shape[0] / new_scale
+    png, width, height = cleaned_image(docs[0][number], a, dpi)
     for doc in docs:
-        new = doc.new_page(pno=number, width=width, height=height)
-        new.insert_image(new.rect, stream=png)
-        doc.delete_page(number + 1)
-    return new_scale
+        put_page_image(doc, number, png, width, height)
+    return docs[0][number].get_image_info()[0]["width"] / width
 
 
 def replace_page(doc: pymupdf.Document, number: int, a: CleanupPlan, dpi: int = 300) -> float:

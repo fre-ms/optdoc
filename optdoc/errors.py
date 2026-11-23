@@ -48,9 +48,26 @@ KINDS: dict[str, dict[str, str]] = {
         "en": "The OCR engine {reader} failed on a page.",
         "de": "Die Texterkennung {reader} ist an einer Seite gescheitert.",
     },
-    "bad-plan": {
-        "en": "The clean-up plan cannot be used: {reason}.",
-        "de": "Der Aufbereitungsplan ist nicht verwendbar: {reason}.",
+    "bad-config": {
+        "en": "The configuration cannot be used: {reason}.",
+        "de": "Die Konfiguration ist nicht verwendbar: {reason}.",
+    },
+    "config-mismatch": {
+        "en": "The configuration belongs to another file.",
+        "de": "Die Konfiguration gehört zu einer anderen Datei.",
+    },
+    "not-ocr": {
+        "en": "Page {page} was not read by OCR; its text cannot be corrected.",
+        "de": "Seite {page} wurde nicht per Texterkennung gelesen; ihr Text lässt sich nicht "
+              "berichtigen.",
+    },
+    "cancelled": {
+        "en": "The work was cancelled; nothing was written.",
+        "de": "Die Arbeit wurde abgebrochen; nichts wurde geschrieben.",
+    },
+    "no-gui": {
+        "en": "The window needs PySide6, which comes with the extra 'gui'.",
+        "de": "Das Fenster braucht PySide6, das mit dem Extra „gui“ kommt.",
     },
     "same-as-source": {
         "en": "The results would overwrite the document itself; choose another folder.",
@@ -85,14 +102,16 @@ KINDS: dict[str, dict[str, str]] = {
     },
 }
 
-# the reasons a plan is refused, worded for "bad-plan"
+# the reasons a configuration is refused, worded for "bad-config"
 REASONS: dict[str, dict[str, str]] = {
-    "json": {"en": "it is no JSON object keyed by page number",
-             "de": "er ist kein JSON-Objekt mit Seitenzahlen als Schlüsseln"},
-    "page": {"en": "it names a page the document does not have",
-             "de": "er nennt eine Seite, die das Dokument nicht hat"},
-    "field": {"en": "a page's plan has a value of the wrong kind",
-              "de": "der Plan einer Seite hat einen Wert der falschen Art"},
+    "json": {"en": "it is no JSON that can be read",
+             "de": "sie ist kein lesbares JSON"},
+    "format": {"en": "it is no configuration of this version of optdoc",
+               "de": "sie ist keine Konfiguration dieser Fassung von optdoc"},
+    "page": {"en": "it does not have one entry for each page of the document",
+             "de": "sie hat nicht für jede Seite des Dokuments einen Eintrag"},
+    "field": {"en": "a value is of the wrong kind",
+              "de": "ein Wert ist von der falschen Art"},
 }
 
 LANGUAGES = ("en", "de")
@@ -113,7 +132,7 @@ class OptdocError(Exception):
         """The message in ``language`` ("en" or "de"; any other means English)."""
         wording = KINDS[self.kind]
         details = dict(self.details)
-        if self.kind == "bad-plan":
+        if self.kind == "bad-config":
             reason = REASONS.get(str(details.get("reason")), REASONS["json"])
             details["reason"] = reason.get(language, reason["en"])
         return wording.get(language, wording["en"]).format(**details)

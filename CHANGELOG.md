@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.4.0 (2026-11-23)
+
+Interface 2: the configuration takes the place of the plan (see `docs/interface.md`, "From
+interface 1").
+
+### Added
+
+- **The window** (`optdoc edit`, `optdoc.gui`, extra `gui`, PySide6), moved here from PseudonyMed's
+  pages "Aufbereiten" and "Texterkennung", in English and German (`--language`). Clean up each page
+  before and after (every step switchable with its strength, rotation, areas erased, the suggestion
+  restored, a page left as it came, copied to every page, orientation detected) and check the text
+  beside the page, words read with little confidence marked. It starts with optdoc's suggestions, so
+  that *Apply* at once gives what `prepare` gives. *Apply* writes the four files, *Save and continue
+  later* the configuration alone, *Cancel* nothing (error `cancelled`). No settings of its own, nothing
+  outside `--out`, no network; checked under `sandbox-exec` without network and with empty home and
+  temporary folders. `--self-test` goes through it without a person (the build uses it).
+- **The configuration** (`<stem>.optdoc.json`, format `optdoc-config` version 1, `optdoc.project`):
+  the settings, every page's clean-up, the words OCR read and the person's corrections, the file it
+  belongs to by its SHA-256; no paths, no times. It is also embedded in the PDF (`optdoc.json`).
+  `prepare --config` and `edit --config` take it, or the PDF that carries it. **The same file and the
+  same configuration give the same four files, byte for byte**: the words are stored, so OCR does not
+  run again, and the PDF carries no time and an identifier made from the configuration.
+- **Corrected text** in the text layer, the reading and the Markdown: the corrected text is laid on the
+  boxes OCR found; words left as read keep their confidence; each OCR word in the reading says `by`:
+  `"ocr"` or `"person"`. The answer lists the `corrected` pages.
+- `optdoc.project.Project`, the work on one document for programs: open, change plans and corrections,
+  read page by page, save the configuration, build the result.
+- Kinds of error `bad-config` (reasons `json`, `format`, `page`, `field`), `config-mismatch`,
+  `not-ocr`, `cancelled`, `no-gui`; `readers` says whether the window can open (`window`).
+- `alignment.align_correction`: `text_layer_from_correction`, and which words a person wrote.
+- `ocr.recognise_words`, `cleanup.cleaned_image` and `cleanup.put_page_image`: the steps of
+  `recognise_page` and `replace_pages`, one at a time.
+
+### Changed
+
+- `reading.read` works through a project; its result carries the configuration (`Reading.config`).
+- `alignment.text_layer_from_correction` keeps the engine's confidence for a word left as it was
+  read; before, every word of a corrected text had confidence 1.
+- `CleanupPlan.from_dict` refuses a broken plan as `bad-config` (was `bad-plan`).
+- The standalone program carries PySide6 (Qt Widgets only): 161.6 MB as one file, 506.4 MB as a folder.
+
+### Removed
+
+- `<stem>.plan.json`, `prepare --plan`, the answer field `plan` and the kind of error `bad-plan`: the
+  configuration holds the plans.
+- `reading.ocr_page`; use `Project.read`.
+
 ## 0.3.0 (2026-11-23)
 
 ### Added

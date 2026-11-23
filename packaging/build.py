@@ -1,6 +1,6 @@
 """Build optdoc as one executable file and try it out.
 
-    uv sync --extra ocr --extra tables --group build
+    uv sync --extra ocr --extra tables --extra gui --group build
     uv run python packaging/build.py [--identity "Developer ID Application: …"] [--no-check]
 
 writes ``dist/optdoc-<target>`` (the name Tauri expects of a sidecar, ``<target>`` being
@@ -68,15 +68,15 @@ def build(name: str, identity: str | None, onedir: bool = False) -> Path:
 
 
 def licences() -> list[dict[str, str]]:
-    """The Python distributions the program carries (optdoc with the extras "ocr" and
-    "tables" and what they need), each with its version and licence as its metadata states
-    it."""
+    """The Python distributions the program carries (optdoc with the extras "ocr",
+    "tables" and "gui" and what they need), each with its version and licence as its
+    metadata states it."""
     from importlib import metadata
 
     from packaging.requirements import Requirement
 
     found: dict[str, dict[str, str]] = {}
-    queue = [("optdoc", {"ocr", "tables"})]
+    queue = [("optdoc", {"ocr", "tables", "gui"})]
     while queue:
         name, extras = queue.pop()
         key = name.lower().replace("_", "-")
@@ -116,8 +116,9 @@ def check(program: Path) -> dict[str, object]:
     checks: dict[str, str] = {}
     status, answer, _, timings["readers"] = _run([str(program), "readers"])
     assert status == 0 and "rapidocr" in answer["readers"], answer
-    assert answer["clean_up"] and answer["heic"] and answer["tables"], answer
-    assert answer["interface"] >= 1, answer
+    assert answer["clean_up"] and answer["heic"] and answer["tables"] and answer["window"], \
+        answer
+    assert answer["interface"] >= 2, answer
     checks["readers"] = f"{answer['made_with']}, readers {answer['readers']}"
     with tempfile.TemporaryDirectory() as folder:
         work = Path(folder)
@@ -137,26 +138,46 @@ def check(program: Path) -> dict[str, object]:
         assert answer["tables"] and answer["tables"] >= 1, answer
         assert [json.loads(z) for z in err.splitlines()] == [{"page": 1, "of": 1}], err
         assert sorted(p.name for p in (work / "out").iterdir()) == [
-            "foto.md", "foto.pdf", "foto.plan.json", "foto.reading.json"]
+            "foto.md", "foto.optdoc.json", "foto.pdf", "foto.reading.json"]
         left = [str(p.relative_to(work)) for f in empty.values() for p in f.rglob("*")]
         assert not left, left
         checks["prepare"] = ("photo read, its table found, four files, nothing left in tmp, "
                              "home or cache")
+        status, again, _, timings["prepare --config"] = _run(
+            [str(program), "prepare", str(photo), "--out", str(work / "again"), "--config",
+             answer["config"]], env)
+        assert status == 0, again
+        for key in ("pdf", "reading", "markdown", "config"):
+            assert Path(again[key]).read_bytes() == Path(answer[key]).read_bytes(), key
+        checks["reproduced"] = "the same four files again from the configuration, byte for byte"
+        status, edited, _, timings["edit --self-test"] = _run(
+            [str(program), "edit", str(photo), "--out", str(work / "edited"), "--self-test"],
+            {**env, "QT_QPA_PLATFORM": "offscreen"})
+        assert status == 0 and edited["finished"], edited
+        assert Path(edited["pdf"]).read_bytes() == Path(answer["pdf"]).read_bytes()
+        left = [str(p.relative_to(work)) for f in empty.values() for p in f.rglob("*")]
+        assert not left, left
+        checks["window"] = "opened without a screen, applied, the same PDF, nothing left behind"
         status, answer, _, _ = _run([str(program), "prepare", str(work / "fehlt.jpg")])
         assert status == 2 and answer["error"] == "missing", answer
         checks["failure"] = "answers with its kind"
         checks["network"] = _check_offline(program, photo, work / "offline")
+        checks["network, window"] = _check_offline(program, photo, work / "offline-edit",
+                                                   window=True)
     return {"timings_s": timings, "checks": checks}
 
 
-def _check_offline(program: Path, photo: Path, out: Path) -> str:
-    """``prepare`` once more with the network closed by the system (macOS only)."""
+def _check_offline(program: Path, photo: Path, out: Path, window: bool = False) -> str:
+    """``prepare`` (or the window's self-test) once more with the network closed by the
+    system (macOS only)."""
     sandbox = shutil.which("sandbox-exec")
     if sys.platform != "darwin" or sandbox is None:
         return "not checked by the system (no sandbox-exec)"
-    run = subprocess.run([sandbox, "-p", NO_NETWORK, str(program), "prepare", str(photo),
-                          "--out", str(out)], capture_output=True, text=True, check=False,
-                         timeout=900)
+    command = ["edit", str(photo), "--out", str(out), "--self-test"] if window else [
+        "prepare", str(photo), "--out", str(out)]
+    run = subprocess.run([sandbox, "-p", NO_NETWORK, str(program), *command],
+                         capture_output=True, text=True, check=False, timeout=900,
+                         env={**os.environ, "QT_QPA_PLATFORM": "offscreen"})
     if run.returncode != 0 and not run.stdout.strip():
         return f"not checked by the system (sandbox-exec refused: {run.stderr.strip()[:80]})"
     answer = json.loads(run.stdout)
@@ -183,8 +204,8 @@ def main() -> int:
         "python": licences(),
         "note": "Native libraries inside these packages carry their own licences: OpenCV "
                 "brings FFmpeg (LGPL), pillow-heif brings libheif and libde265 (LGPL) and x265 "
-                "(GPL 2.0 or later), pypdfium2 brings pdfium (Apache 2.0 and BSD); see each "
-                "package's licence files.",
+                "(GPL 2.0 or later), pypdfium2 brings pdfium (Apache 2.0 and BSD), PySide6 "
+                "brings Qt (LGPL 3.0); see each package's licence files.",
     }, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
     files = [p for p in program.parent.rglob("*") if p.is_file()] if args.onedir else [program]
     summary: dict[str, object] = {

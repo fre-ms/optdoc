@@ -4,6 +4,7 @@ error; nothing written outside the folder given; no network."""
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import socket
@@ -18,6 +19,7 @@ from optdoc import __version__, offline, tables
 from optdoc import ocr as ocrlib
 from optdoc.cli import INTERFACE, main
 from optdoc.errors import KINDS
+from optdoc.project import Options, Project
 from tests.synthetic import scan
 
 needs_backend = pytest.mark.skipif(not ocrlib.available_backends(),
@@ -44,7 +46,7 @@ def test_readers(capsys: pytest.CaptureFixture[str]) -> None:
     """What an installation can do, under the names medorello reads."""
     status, answer, _ = _answer(capsys, ["readers"])
     assert status == 0
-    assert set(answer) == HEAD | {"version", "readers", "clean_up", "heic", "tables"}
+    assert set(answer) == HEAD | {"version", "readers", "clean_up", "heic", "tables", "window"}
     assert answer["interface"] == INTERFACE and answer["version"] == __version__
     assert answer["made_with"] == f"optdoc {__version__}"
     assert set(answer["readers"]) <= {"rapidocr", "tesseract"}
@@ -59,8 +61,8 @@ def _encrypted(path: Path) -> Path:
     return path
 
 
-def _plan(folder: Path, name: str, content: str) -> Path:
-    path = folder / f"{PATIENT}-{name}.plan.json"
+def _config(folder: Path, name: str, content: str) -> Path:
+    path = folder / f"{PATIENT}-{name}.optdoc.json"
     path.write_text(content, encoding="utf-8")
     return path
 
@@ -87,11 +89,20 @@ def test_failures_by_kind_without_paths(tmp_path: Path, report: Path,
         "usage": ["prepare", str(good), "--unknown", str(folder)],
         "same-as-source": ["prepare", str(good), "--out", str(folder)],
     }
-    plans = {"json": "[1, 2]", "page": '{"9": {"rotation": 90}}',
-             "field": '{"1": {"rotation": 45}}'}
-    for reason, content in plans.items():
-        cases[f"bad-plan:{reason}"] = ["prepare", str(good), "--out", str(tmp_path / "o"),
-                                       "--plan", str(_plan(folder, reason, content))]
+    fine = Project.open(good, Options(reader="none"))
+    config = fine.config()
+    fine.close()
+    configs = {"json": "{kaputt", "format": "[1, 2]",
+               "page": json.dumps({**config, "pages": config["pages"][:1]}),
+               "field": json.dumps({**config, "options": {"dpi": "viel"}})}
+    for reason, content in configs.items():
+        cases[f"bad-config:{reason}"] = ["prepare", str(good), "--out", str(tmp_path / "o"),
+                                         "--config", str(_config(folder, reason, content))]
+    other = json.dumps({**config, "source": {**config["source"], "sha256": "0" * 64}})
+    cases["config-mismatch"] = ["prepare", str(good), "--out", str(tmp_path / "o"),
+                                "--config", str(_config(folder, "fremd", other))]
+    cases["usage:both"] = ["prepare", str(good), "--reader", "none", "--config",
+                           str(_config(folder, "beides", json.dumps(config)))]
     for expected, argv in cases.items():
         status, answer, err = _answer(capsys, argv)
         kind = expected.split(":")[0]
@@ -99,11 +110,11 @@ def test_failures_by_kind_without_paths(tmp_path: Path, report: Path,
         assert answer["error"] == kind and set(answer) == HEAD | {"error", "details",
                                                                   "message"}, expected
         assert set(answer["message"]) == {"en", "de"}, expected
-        if kind == "bad-plan":
+        if kind == "bad-config":
             assert answer["details"] == {"reason": expected.split(":")[1]}
         said = json.dumps(answer, ensure_ascii=False) + err
         assert PATIENT not in said and str(tmp_path) not in said, (expected, said)
-    assert not (tmp_path / "o").exists()  # a refused plan writes nothing
+    assert not (tmp_path / "o").exists()  # a refused configuration writes nothing
 
 
 def test_answer_names_the_results(tmp_path: Path, report: Path,
@@ -112,12 +123,13 @@ def test_answer_names_the_results(tmp_path: Path, report: Path,
     status, answer, err = _answer(capsys, ["prepare", str(report), "--out",
                                            str(tmp_path / "out")])
     assert status == 0 and err == ""
-    assert set(answer) == HEAD | {"pdf", "reading", "markdown", "plan", "pages", "ocr_pages",
-                                  "pages_without_text", "cleaned_up", "reader", "tables"}
+    assert set(answer) == HEAD | {"pdf", "reading", "markdown", "config", "pages",
+                                  "ocr_pages", "pages_without_text", "cleaned_up", "corrected",
+                                  "reader", "tables"}
     assert answer["tables"] == (0 if tables.available() else None)  # a letter has none
     assert answer["pages"] == 2 and answer["ocr_pages"] == [] and answer["cleaned_up"] == []
     assert all(Path(answer[k]).parent == tmp_path / "out"
-               for k in ("pdf", "reading", "markdown", "plan"))
+               for k in ("pdf", "reading", "markdown", "config"))
     reading = json.loads(Path(answer["reading"]).read_text(encoding="utf-8"))
     assert reading["made_with"] == answer["made_with"]
 
@@ -188,9 +200,10 @@ def test_prepare_reads_offline(tmp_path: Path, report: Path,
 @needs_backend
 def test_prepare_on_the_command_line(tmp_path: Path, report: Path) -> None:
     """``python -m optdoc prepare`` writes the results and answers in JSON; with
-    ``--progress`` standard error holds one line per page and nothing else; the plan it
-    wrote can be handed back.  Nothing lands outside the folder given: not in the
-    temporary folder, not in the home folder, not next to the source."""
+    ``--progress`` standard error holds one line per page and nothing else; from the
+    configuration it wrote, the same result comes again, byte for byte.  Nothing lands
+    outside the folder given: not in the temporary folder, not in the home folder, not
+    next to the source."""
     (tmp_path / "in").mkdir()
     source = scan(report, tmp_path / "in" / "scan.pdf", rotation=2.0)
     elsewhere = {name: tmp_path / name for name in ("tmp", "home", "cache")}
@@ -209,10 +222,39 @@ def test_prepare_on_the_command_line(tmp_path: Path, report: Path) -> None:
     progress = [json.loads(z) for z in run.stderr.splitlines()]
     assert progress == [{"page": 1, "of": 2}, {"page": 2, "of": 2}]
     assert sorted(p.name for p in target.iterdir()) == [
-        "scan.md", "scan.pdf", "scan.plan.json", "scan.reading.json"]
+        "scan.md", "scan.optdoc.json", "scan.pdf", "scan.reading.json"]
     assert [p.name for p in (tmp_path / "in").iterdir()] == ["scan.pdf"]
     for name, folder in elsewhere.items():
         assert not any(folder.rglob("*")), name
-    second = _run(["prepare", str(source), "--out", str(tmp_path / "zwei"), "--plan",
-                   answer["plan"], "--no-structure"])
-    assert json.loads(second.stdout)["cleaned_up"] == [1, 2]
+    second = _run(["prepare", str(source), "--out", str(tmp_path / "zwei"), "--config",
+                   answer["config"]])
+    again = json.loads(second.stdout)
+    assert again["cleaned_up"] == [1, 2]
+    for key in ("pdf", "reading", "markdown", "config"):
+        assert Path(again[key]).read_bytes() == Path(answer[key]).read_bytes(), key
+
+
+@needs_backend
+@pytest.mark.skipif(importlib.util.find_spec("PySide6") is None, reason="needs PySide6")
+def test_edit_goes_through_and_leaves_nothing_behind(tmp_path: Path, report: Path) -> None:
+    """``edit --self-test`` opens the window without a screen, applies, and answers like
+    ``prepare``, with the same files byte for byte; the window leaves nothing in the
+    temporary, home or cache folder (no Qt settings, no caches)."""
+    source = scan(report, tmp_path / "scan.pdf")
+    elsewhere = {name: tmp_path / name for name in ("tmp", "home", "cache")}
+    for folder in elsewhere.values():
+        folder.mkdir()
+    env = {**os.environ, "TMPDIR": str(elsewhere["tmp"]), "TEMP": str(elsewhere["tmp"]),
+           "TMP": str(elsewhere["tmp"]), "HOME": str(elsewhere["home"]),
+           "USERPROFILE": str(elsewhere["home"]), "XDG_CACHE_HOME": str(elsewhere["cache"]),
+           "PYTHONDONTWRITEBYTECODE": "1", "QT_QPA_PLATFORM": "offscreen"}
+    run = _run(["edit", str(source), "--out", str(tmp_path / "e"), "--self-test",
+                "--language", "de"], env=env)
+    assert run.returncode == 0, run.stdout
+    answer = json.loads(run.stdout)
+    assert answer["finished"] is True and answer["ocr_pages"] == [1, 2]
+    for name, folder in elsewhere.items():
+        assert not any(folder.rglob("*")), (name, list(folder.rglob("*")))
+    prepared = json.loads(_run(["prepare", str(source), "--out", str(tmp_path / "p")]).stdout)
+    for key in ("pdf", "reading", "markdown", "config"):
+        assert Path(answer[key]).read_bytes() == Path(prepared[key]).read_bytes(), key

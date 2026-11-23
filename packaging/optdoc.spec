@@ -4,7 +4,8 @@ application (a Tauri sidecar, for medorello).
 
 Build it with ``packaging/build.py``, which names the file after the target platform
 and tries it out.  Everything travels inside: Python, PyMuPDF, OpenCV, ONNX Runtime,
-RapidOCR with its models, pillow-heif, Camelot with pandas and pdfium for the tables.
+RapidOCR with its models, pillow-heif, Camelot with pandas and pdfium for the tables,
+PySide6 (Qt) for the window.
 Nothing is downloaded at run time.
 
 Environment: ``OPTDOC_BINARY_NAME`` (the file's name), ``OPTDOC_CODESIGN_IDENTITY`` (a
@@ -40,7 +41,13 @@ hiddenimports += ["pillow_heif", "PIL.Image", "PIL.ImageFilter", "PIL.ImageOps",
                   "shapely", "pyclipper", "omegaconf", "colorlog", "yaml"]
 # RapidOCR's other inference engines and what optdoc never uses
 excludes = ["torch", "paddle", "openvino", "tensorrt", "MNN", "tkinter", "matplotlib",
-            "IPython", "jupyter", "notebook", "pytest", "PySide6", "PyQt5", "PyQt6"]
+            "IPython", "jupyter", "notebook", "pytest", "PyQt5", "PyQt6",
+            # Qt modules the window does not use
+            "PySide6.QtNetwork", "PySide6.QtQml", "PySide6.QtQuick", "PySide6.QtSql",
+            "PySide6.QtTest", "PySide6.QtXml", "PySide6.QtOpenGL", "PySide6.QtOpenGLWidgets",
+            "PySide6.QtDBus", "PySide6.QtConcurrent", "PySide6.QtPrintSupport",
+            "PySide6.QtSvg", "PySide6.QtSvgWidgets", "PySide6.QtUiTools", "PySide6.QtDesigner",
+            "PySide6.QtHelp"]
 
 a = Analysis(  # noqa: F821
     [str(root / "packaging" / "start.py")],

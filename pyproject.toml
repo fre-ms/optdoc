@@ -1,6 +1,6 @@
 [project]
 name = "optdoc"
-version = "0.3.0"
+version = "0.4.0"
 description = "Makes photographed and scanned documents legible: straighten, clean up, OCR with word boxes and tables, searchable PDF."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -28,6 +28,9 @@ dependencies = [
 ocr = ["rapidocr>=3", "onnxruntime>=1.18", "pillow>=10", "pillow-heif>=0.18"]
 tables = [
     "camelot-py>=2.2",
+]
+gui = [
+    "pyside6-essentials>=6.8",
 ]
 
 [project.scripts]
