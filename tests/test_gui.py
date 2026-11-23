@@ -16,6 +16,7 @@ from optdoc.project import Project
 from tests.synthetic import scan
 
 pytest.importorskip("PySide6")
+from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from optdoc.gui.window import EditWindow  # noqa: E402
@@ -129,3 +130,54 @@ def test_later_and_cancel(app: QApplication, report: Path) -> None:
             assert window.outcome == outcome
         finally:
             project.close()
+
+
+@needs_opencv
+def test_corners_dragged_and_turned(app: QApplication, tmp_path: Path, report: Path) -> None:
+    """The sheet's corners are shown on the original and dragged there: the plan takes
+    them and unwarps.  A quarter turn takes the corners with it; turning back brings
+    them back.  A photo whose sheet optdoc did not find starts from the page's own
+    corners, dashed."""
+    import cv2
+
+    from tests.synthetic import camera_photo
+
+    image, _true = camera_photo(report, pitch=25, yaw=8)
+    cv2.imwrite(str(tmp_path / "foto.jpg"), image)
+    project = Project.open(tmp_path / "foto.jpg")
+    window = EditWindow(project, Words("en"), synchronous=True)
+    try:
+        panel = window.cleanup
+        found = project.plan(0).corners
+        assert found and project.plan(0).unwarp
+        assert len(panel.before._handles) == 4  # shown where they were found
+        x, y = found[0]
+        panel.before.move_corner(0, x + 5, y + 3)  # what a drag ends in
+        assert project.plan(0).corners[0] == pytest.approx((x + 5, y + 3))
+        moved = list(project.plan(0).corners)
+        panel.rotate(90)
+        assert project.plan(0).rotation == 90 and project.plan(0).corners != moved
+        panel.rotate(270)
+        assert project.plan(0).rotation == 0
+        assert [c for p in project.plan(0).corners for c in p] == pytest.approx(
+            [c for p in moved for c in p])
+    finally:
+        window.outcome = "cancelled"
+        window.close()
+        project.close()
+    flat = tmp_path / "flach.png"
+    cv2.imwrite(str(flat), cv2.imread(str(tmp_path / "foto.jpg"))[200:1400, 200:1000])
+    project = Project.open(flat)  # a piece of the sheet, no edges: nothing found
+    window = EditWindow(project, Words("de"), synchronous=True)
+    try:
+        assert project.plan(0) is None or not project.plan(0).corners
+        panel = window.cleanup
+        assert len(panel.before._handles) == 4
+        assert panel.before._outline.pen().style() == Qt.PenStyle.DashLine
+        assert "Ecken" in panel.note.text()
+        panel.before.move_corner(2, 400, 600)
+        assert project.plan(0).unwarp and project.plan(0).corners[2] == pytest.approx((400, 600))
+    finally:
+        window.outcome = "cancelled"
+        window.close()
+        project.close()

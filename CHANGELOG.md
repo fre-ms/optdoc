@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.5.0 (2026-11-23)
+
+Photos taken at a slant. Interface 2 and the configuration's format are unchanged, but a
+configuration made by 0.4.0 gives a different PDF for a photographed page: the sheet now has its
+true proportions.
+
+Measured on 30 invented laboratory reports photographed by a simulated phone camera (26 mm),
+six each on a dark desk at a slight and at a strong slant, on a light grey table, on a wooden
+desk, and with the foot or head of the sheet cut off by the photo: the sheet is found in 29
+(0.4.0: 21); OCR then reads 1525 of 1530 numbers right (0.4.0: 1450; unwarped with the true
+corners: 1522) and 91 % of the table rows exactly (0.4.0: 61 %). Compared were Apple Vision's
+document and rectangle detection (1499 numbers, 66 % of rows), DocAligner, UVDoc (PaddleOCR's,
+which bent the tables) and page-dewarp (which needs a page full of text); none did better.
+
+### Changed
+
+- **True proportions.** An unwarped sheet takes its width and height from the perspective of its
+  corners (Zhang and He, 2007), with the focal length from the corners where they tell it and a
+  phone's (26 mm) where they do not, snapped to A4, A5, Letter or Legal within 3 %. Before, it took
+  the longer of each pair of sides: 8 to 43 % off at a slant; now within 1 %, and within about 5 %
+  for a phone between 24 and 28 mm with corners a few pixels off (before snapping).
+- **The sheet is found more often.** Besides the edge search, a second search fits straight lines
+  to the visible edges of the paper, so that a corner may lie outside the photo; where a whole edge
+  of the sheet is outside, it is reconstructed from the other three and the camera, and what the
+  photo did not show stays white. The white bars of a photo placed on paper are no part of the
+  picture.
+- **Desk or paper** is told by a narrow ring just outside the outline. Before, everything outside
+  counted, so that a desk around the sheet made a table on it look like the sheet. The difference
+  asked for is now 15 grey levels (was 30): a light grey table lay 34 to 37 below the paper, and
+  paper around a frame is brighter than inside it, by 16 to 31. The corner search itself rejects an
+  outline with paper around it, so `--photo` no longer cuts a page to a table.
+
+### Added
+
+- The window shows the sheet's four corners on the page before, to be dragged; where optdoc found
+  none, dashed at the page's corners, as a start.
+- `cleanup.sheet_aspect` (proportions from four corners) and `cleanup.turn_points`.
+
+### Fixed
+
+- A quarter turn in the window left the sheet's corners where they were on the unturned page, so
+  that unwarping then cut out the wrong area; they turn with the page now.
+- What lies outside the photo after unwarping is white; it repeated the pixels at the edge.
+
 ## 0.4.0 (2026-11-23)
 
 Interface 2: the configuration takes the place of the plan (see `docs/interface.md`, "From

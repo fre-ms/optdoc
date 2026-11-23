@@ -27,7 +27,8 @@ WORDS: dict[str, tuple[str, str]] = {  # key: (English, German)
     "read_all": ("Every page read.", "Alle Seiten gelesen."),
     "failed": ("That did not work: {error}", "Das ging nicht: {error}"),
     # clean-up
-    "before": ("Before", "Vorher"),
+    "before": ("Before (drag the blue corners onto the sheet's corners to unwarp it)",
+               "Vorher (die blauen Ecken auf die Ecken des Blatts ziehen, um es zu entzerren)"),
     "after": ("After (as OCR sees it; drag erases an area white, Cmd/Ctrl+Z takes it back; "
               "Shift/Option + drag moves both views)",
               "Nachher (so sieht es die Texterkennung; Ziehen löscht den Bereich weiß, "
@@ -79,7 +80,8 @@ WORDS: dict[str, tuple[str, str]] = {  # key: (English, German)
     "has_layer": ("This page has a text layer of its own; it is read as it is, not cleaned up.",
                   "Diese Seite hat eine eigene Textebene; sie wird gelesen, wie sie ist, nicht "
                   "aufbereitet."),
-    "no_sheet": ("no photographed sheet found", "kein fotografiertes Blatt erkannt"),
+    "no_sheet": ("no photographed sheet found; drag the corners in “Before” onto it",
+                 "kein fotografiertes Blatt erkannt; in „Vorher“ die Ecken darauf ziehen"),
     "orientation_failed": ("Orientation not found: {error}", "Ausrichtung nicht erkannt: {error}"),
     "cleanup_failed": ("Clean-up failed: {error}", "Aufbereitung fehlgeschlagen: {error}"),
     # text

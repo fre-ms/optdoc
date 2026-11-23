@@ -4,6 +4,7 @@ the way medRDS binds them), unwarped; turned pages read and written upright."""
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pymupdf
 import pytest
@@ -12,7 +13,7 @@ from optdoc import cleanup, output
 from optdoc import ocr as ocrlib
 from optdoc.loading import open_document
 from optdoc.reading import read
-from tests.synthetic import bind, lab_report, photograph
+from tests.synthetic import bind, camera_photo, lab_report, photograph
 
 pytestmark = pytest.mark.skipif(not cleanup.available(), reason="needs OpenCV (extra 'ocr')")
 needs_backend = pytest.mark.skipif(not ocrlib.available_backends(),
@@ -24,9 +25,10 @@ def _image(page: pymupdf.Page) -> tuple:
 
 
 def test_frames_on_a_scan_are_no_sheet(tmp_path: Path) -> None:
-    """On a scan, the frame of a ruled table looks like a sheet to the corner search; cut
-    to it, the page would lose its head and foot.  So would a form whose frame holds all
-    of it, with bare paper around.  Paper around the frame tells."""
+    """On a scan, the frame of a ruled table looks like a sheet to an edge search; cut to
+    it, the page would lose its head and foot.  So would a form whose frame holds all of
+    it, with bare paper around.  Paper around the frame tells, and the corner search
+    itself asks it (with ``--photo`` too)."""
     pdf, _ = lab_report(tmp_path, 1)
     form = pymupdf.open()
     page = form.new_page(width=595, height=842)
@@ -35,7 +37,7 @@ def test_frames_on_a_scan_are_no_sheet(tmp_path: Path) -> None:
     with pymupdf.open(pdf) as doc:
         pages = [_image(doc[0]), _image(form[0])]
     for image, scale in pages:
-        assert cleanup.find_corners(image, scale) is not None  # the trap
+        assert cleanup.find_corners(image, scale) is None
         assert cleanup.sheet_in_photo(image, scale) is None
         assert not cleanup.suggest(image, None, scale).unwarp
 
@@ -110,3 +112,85 @@ def test_exif_turned_photo(tmp_path: Path) -> None:
         assert truth[0].split()[0] in reading.pages[0].text.text
     finally:
         reading.close()
+
+
+# -- photographed at a slant ----------------------------------------------------------------------
+def _unwarped_corners(found: list, true: Any, size: tuple[int, int]) -> Any:
+    """Where the sheet's true corners land after unwarping with the corners found, as
+    optdoc does it (true proportions): top-left, top-right, bottom-right, bottom-left."""
+    import cv2
+    import numpy as np
+
+    q = np.array(found, dtype=np.float64)
+    aspect = cleanup.sheet_aspect(q, (size[0] / 2, size[1] / 2))
+    height = max(np.linalg.norm(q[3] - q[0]), np.linalg.norm(q[2] - q[1]))
+    target = np.float32([[0, 0], [height * aspect, 0], [height * aspect, height], [0, height]])
+    m = cv2.getPerspectiveTransform(q.astype(np.float32), target)
+    return cv2.perspectiveTransform(np.float32(true).reshape(-1, 1, 2), m).reshape(-1, 2)
+
+
+def _square(points: Any) -> tuple[float, float]:
+    """How far four points are from a rectangle with A4's proportions: the largest
+    deviation of the sides from level and plumb, as a share of the height, and that of
+    the proportions from A4's."""
+    import numpy as np
+
+    tl, tr, br, bl = points
+    height = float(np.linalg.norm(bl - tl))
+    deviations = [abs(tl[1] - tr[1]), abs(bl[1] - br[1]), abs(tl[0] - bl[0]), abs(tr[0] - br[0])]
+    width = float(np.linalg.norm(tr - tl))
+    return max(deviations) / height, abs(width / height / 2 ** -0.5 - 1)
+
+
+@pytest.mark.parametrize("case", [
+    {"pitch": 30, "yaw": 10, "roll": 4},  # strongly slanted, on a dark desk
+    {"pitch": 25, "yaw": -6, "roll": 2, "fill": 0.88},  # a corner runs out of the photo
+    {"pitch": 20, "yaw": 5, "roll": -3, "desk": "light"},  # on a light grey table
+    {"pitch": 20, "yaw": 6, "roll": 3, "fill": 1.02},  # the foot of the sheet is cut off
+], ids=["slanted", "corner-cut", "light-table", "edge-cut"])
+def test_sheet_photographed_at_a_slant(tmp_path: Path, case: dict) -> None:
+    """A sheet photographed at a slant comes out square and in A4's proportions: the
+    true corners map to a rectangle, level and plumb within 1 %, also where the photo
+    cut a corner off or the whole foot of the sheet (that edge is reconstructed), and on
+    a table only a little darker than paper; the proportions within 1 % (snapped to A4),
+    within 3 % for a sheet whose edge was reconstructed (only part of it is seen, so it
+    is not snapped).  Before: the proportions from the sides alone were off by up to
+    43 %, and a corner outside the photo meant no sheet, or the table taken for it."""
+    import numpy as np
+
+    pdf, _ = lab_report(tmp_path, 1)
+    image, true = camera_photo(pdf, **case)
+    found = cleanup.sheet_in_photo(image, 1.0)
+    assert found is not None
+    level, proportions = _square(_unwarped_corners(found, true, (image.shape[1], image.shape[0])))
+    assert level < 0.01
+    assert proportions < (0.03 if case.get("fill", 0.8) > 1 else 0.01)
+    inside = [(x, y) for x, y in true if 0 <= x < image.shape[1] and 0 <= y < image.shape[0]]
+    for x, y in inside:  # every corner in the photo is found, within a few pixels
+        assert min(np.hypot(x - c[0], y - c[1]) for c in found) < 0.005 * np.hypot(*image.shape[:2])
+
+
+def test_proportions_of_a_rectangle_seen_at_a_slant() -> None:
+    """Zhang and He's proportions: exact for a rectangle of any shape seen by a phone's
+    camera, also nearly head-on, where the focal length cannot be told from the corners
+    and a phone's is taken; from the sides alone, as before, far off."""
+    import math
+
+    import numpy as np
+
+    w, h = 1200, 1600
+    focal = 26 / 43.27 * math.hypot(w, h)
+    for ratio, pitch, yaw in ((1.5, 25, 12), (0.5, 35, 0), (1.0, 2, 1), (0.8, 18, -9)):
+        p, y = math.radians(pitch), math.radians(yaw)
+        about_y = [[math.cos(y), 0, math.sin(y)], [0, 1, 0], [-math.sin(y), 0, math.cos(y)]]
+        about_x = [[1, 0, 0], [0, math.cos(p), -math.sin(p)], [0, math.sin(p), math.cos(p)]]
+        turn = np.array(about_y) @ np.array(about_x)
+        half = np.array([100 * ratio, 100])
+        rect = np.array([[-half[0], -half[1], 0], [half[0], -half[1], 0],
+                         [half[0], half[1], 0], [-half[0], half[1], 0]])
+        points = (turn @ rect.T).T + [0, 0, 500]
+        q = np.c_[focal * points[:, 0] / points[:, 2] + w / 2,
+                  focal * points[:, 1] / points[:, 2] + h / 2]
+        assert cleanup.sheet_aspect(q, (w / 2, h / 2)) == pytest.approx(ratio, rel=0.005)
+        if pitch > 20:
+            assert abs(cleanup._side_aspect(q) / ratio - 1) > 0.05

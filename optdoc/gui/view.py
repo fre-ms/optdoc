@@ -1,8 +1,9 @@
 """A page as an image, zoomable, with boxes on it; two views can move together.
 
 From PseudonyMed's review step.  Dragging draws a box (a mask, in the clean-up), a click
-names a point (a word, in the text check); Shift or Option/Alt and drag, or the middle
-button, moves the view; Ctrl/Cmd and the wheel zooms.
+names a point (a word, in the text check), and where the view shows a sheet's four corners,
+dragging one moves it; Shift or Option/Alt and drag, or the middle button, moves the view;
+Ctrl/Cmd and the wheel zooms.
 """
 
 from __future__ import annotations
@@ -10,9 +11,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QImage, QMouseEvent, QPen, QPixmap
+from PySide6.QtGui import QBrush, QColor, QImage, QMouseEvent, QPen, QPixmap, QPolygonF
 from PySide6.QtWidgets import (
+    QGraphicsEllipseItem,
     QGraphicsPixmapItem,
+    QGraphicsPolygonItem,
     QGraphicsRectItem,
     QGraphicsScene,
     QGraphicsView,
@@ -23,6 +26,8 @@ from PySide6.QtWidgets import (
 PREVIEW_DPI = 100
 YELLOW = QColor(230, 165, 0)
 GREY = QColor(120, 120, 120)
+BLUE = QColor(0, 110, 210)
+HANDLE = 7.0  # radius of a corner handle, in screen pixels
 Box = tuple[float, float, float, float]
 
 
@@ -30,6 +35,7 @@ class PageView(QGraphicsView):
     """One page as an image with boxes; see the module."""
 
     box_drawn = Signal(object)  # (x0, y0, x1, y1) in page points
+    corners_moved = Signal(object)  # the four corners after a drag, [(x, y), ...] in page points
     point_selected = Signal(float, float)  # a click: x, y in page points
     scrolled = Signal(float, float)  # relative scroll position (0..1, 0..1)
     zoomed = Signal(float)  # zoom factor relative to the base scale
@@ -44,6 +50,10 @@ class PageView(QGraphicsView):
         self._start: QPointF | None = None
         self._band: QGraphicsRectItem | None = None
         self._follows = False
+        self._corners: list[QPointF] = []  # scene positions of the corners shown
+        self._handles: list[QGraphicsEllipseItem] = []
+        self._outline: QGraphicsPolygonItem | None = None
+        self._dragged: int | None = None  # the corner being dragged
         self.horizontalScrollBar().valueChanged.connect(self._emit_scroll)
         self.verticalScrollBar().valueChanged.connect(self._emit_scroll)
 
@@ -51,6 +61,7 @@ class PageView(QGraphicsView):
     def display(self, png: bytes, boxes: Sequence[tuple[Box, QColor, str]] = ()) -> None:
         """Show the page image and a box per ``(box in points, colour, tooltip)``."""
         self._scene.clear()
+        self._corners, self._handles, self._outline = [], [], None
         image = QImage.fromData(png)
         self._scene.addItem(QGraphicsPixmapItem(QPixmap.fromImage(image)))
         self._scene.setSceneRect(0, 0, image.width(), image.height())
@@ -67,6 +78,55 @@ class PageView(QGraphicsView):
     def show_empty(self) -> None:
         """Show nothing."""
         self._scene.clear()
+        self._corners, self._handles, self._outline = [], [], None
+
+    def show_corners(self, corners: Sequence[tuple[float, float]] | None,
+                     found: bool = True) -> None:
+        """Show four corners (page points) joined by lines, to be dragged; ``found``
+        False draws them dashed (a start for the person, not what optdoc found).  None
+        shows none.  Call after :meth:`display`."""
+        for item in [*self._handles, *([self._outline] if self._outline else [])]:
+            self._scene.removeItem(item)
+        self._handles, self._outline = [], None
+        self._corners = [] if corners is None else [
+            QPointF(x * self.scale_factor, y * self.scale_factor) for x, y in corners]
+        if not self._corners:
+            return
+        pen = QPen(BLUE, 2)
+        pen.setCosmetic(True)
+        if not found:
+            pen.setStyle(Qt.PenStyle.DashLine)
+        self._outline = QGraphicsPolygonItem(QPolygonF(self._corners))
+        self._outline.setPen(pen)
+        self._scene.addItem(self._outline)
+        for point in self._corners:
+            handle = QGraphicsEllipseItem(-HANDLE, -HANDLE, 2 * HANDLE, 2 * HANDLE)
+            handle.setPos(point)
+            handle.setPen(pen)
+            handle.setBrush(QBrush(QColor(255, 255, 255, 200)))
+            handle.setFlag(QGraphicsEllipseItem.GraphicsItemFlag.ItemIgnoresTransformations)
+            self._scene.addItem(handle)
+            self._handles.append(handle)
+        # corners outside the page stay reachable
+        self._scene.setSceneRect(self._scene.itemsBoundingRect())
+
+    def move_corner(self, index: int, x: float, y: float) -> None:
+        """Move corner ``index`` to ``(x, y)`` in page points, as a drag ends there."""
+        self._corners[index] = QPointF(x * self.scale_factor, y * self.scale_factor)
+        self._handles[index].setPos(self._corners[index])
+        if self._outline is not None:
+            self._outline.setPolygon(QPolygonF(self._corners))
+        f = self.scale_factor
+        self.corners_moved.emit([(p.x() / f, p.y() / f) for p in self._corners])
+
+    def _corner_at(self, position: QPointF) -> int | None:
+        """The corner whose handle lies under a point of the view, if any."""
+        for k, corner in enumerate(self._corners):
+            on_screen = self.mapFromScene(corner)
+            if (on_screen.x() - position.x()) ** 2 + (on_screen.y() - position.y()) ** 2 \
+                    <= (2 * HANDLE) ** 2:
+                return k
+        return None
 
     def _rect(self, box: Box) -> QRectF:
         """A box in page points as a rectangle of the scene (pixels of the image)."""
@@ -148,6 +208,9 @@ class PageView(QGraphicsView):
                                     event.modifiers())
             super().mousePressEvent(event)
             return
+        self._dragged = self._corner_at(event.position())
+        if self._dragged is not None:
+            return
         self._start = self.mapToScene(event.position().toPoint())
         if self.drawing:
             self._band = QGraphicsRectItem(QRectF(self._start, self._start))
@@ -159,6 +222,13 @@ class PageView(QGraphicsView):
         if self.dragMode() == QGraphicsView.DragMode.ScrollHandDrag:
             super().mouseMoveEvent(event)
             return
+        if self._dragged is not None:
+            pos = self.mapToScene(event.position().toPoint())
+            self._corners[self._dragged] = pos
+            self._handles[self._dragged].setPos(pos)
+            if self._outline is not None:
+                self._outline.setPolygon(QPolygonF(self._corners))
+            return
         if self._start is not None and self._band is not None:
             pos = self.mapToScene(event.position().toPoint())
             self._band.setRect(QRectF(self._start, pos).normalized())
@@ -168,6 +238,11 @@ class PageView(QGraphicsView):
         if self.dragMode() == QGraphicsView.DragMode.ScrollHandDrag:
             super().mouseReleaseEvent(event)
             self.setDragMode(QGraphicsView.DragMode.NoDrag)
+            return
+        if self._dragged is not None:
+            pos = self.mapToScene(event.position().toPoint())
+            index, self._dragged = self._dragged, None
+            self.move_corner(index, pos.x() / self.scale_factor, pos.y() / self.scale_factor)
             return
         if self._start is None:
             return

@@ -1,5 +1,5 @@
 """The clean-up of one page, checked by eye: before and after side by side, every step
-switchable, masks drawn on the result.
+switchable, the sheet's corners dragged on the original, masks drawn on the result.
 
 From PseudonyMed's step "Aufbereiten".  The panel works on a :class:`~optdoc.project.
 Project`; every change goes into the project at once (:meth:`Project.set_plan`), which
@@ -72,6 +72,7 @@ class CleanupPanel(QWidget):
         self.before, self.after = PageView(), PageView()
         self.after.drawing = True
         self.after.box_drawn.connect(self.add_mask)
+        self.before.corners_moved.connect(self.set_corners)
         PageView.link(self.before, self.after)
         for view, title in ((self.before, self.w("before")), (self.after, self.w("after"))):
             column = QWidget()
@@ -250,10 +251,27 @@ class CleanupPanel(QWidget):
         self.changed.emit(self.number)
 
     # -- actions -------------------------------------------------------------------------------
+    def _size(self, rotation: int) -> tuple[float, float]:
+        """The page's width and height in points once turned by ``rotation``."""
+        rect = self.project.original[self.number].rect
+        return (rect.width, rect.height) if rotation in (0, 180) else (rect.height, rect.width)
+
     def rotate(self, degrees: int) -> None:
-        """Turn the page by quarter turns; masks drawn on the old orientation go."""
+        """Turn the page by quarter turns; the sheet's corners turn with it, masks drawn
+        on the old orientation go."""
+        if self.plan.corners:
+            self.plan.corners = cleanup.turn_points(self.plan.corners, degrees % 360,
+                                                    self._size(self.plan.rotation))
         self.plan.rotation = (self.plan.rotation + degrees) % 360
         self.plan.masks = []
+        self._commit()
+
+    def set_corners(self, corners: list[tuple[float, float]]) -> None:
+        """The sheet's corners as the person dragged them on the original page (points),
+        kept on the turned page as the plan has them; unwarping goes on."""
+        self.plan.corners = cleanup.turn_points(corners, self.plan.rotation, self._size(0))
+        self.plan.unwarp = True
+        self._to_form()
         self._commit()
 
     def add_mask(self, rect: tuple[float, float, float, float]) -> None:
@@ -320,6 +338,19 @@ class CleanupPanel(QWidget):
         self._commit()
 
     # -- drawing -------------------------------------------------------------------------------
+    def _show_corners(self) -> None:
+        """The sheet's corners on the original page, to be dragged: those of the plan
+        (turned back), else the page's own, dashed, as a start."""
+        a = self.plan
+        if a.corners:
+            back = (360 - a.rotation) % 360
+            self.before.show_corners(cleanup.turn_points(a.corners, back, self._size(a.rotation)))
+            return
+        w, h = self._size(0)
+        inset = 0.03 * min(w, h)
+        self.before.show_corners([(inset, inset), (w - inset, inset), (w - inset, h - inset),
+                                  (inset, h - inset)], found=False)
+
     def draw(self) -> None:
         """Both views and the note describing the steps."""
         n = self.number
@@ -331,6 +362,7 @@ class CleanupPanel(QWidget):
             self.note.setText(self.w("has_layer") if cleanup.available()
                               else self.w("no_opencv"))
             return
+        self._show_corners()
         try:
             png, _scale = self.project.preview(n, self.plan, PREVIEW_DPI)
         except Exception as e:  # shown instead of breaking the window

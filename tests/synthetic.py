@@ -10,6 +10,7 @@ import io
 import random
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 import pymupdf
 
@@ -185,3 +186,58 @@ def scan(report: Path, target: Path, dpi: int = 200, noise: float = 0.0,
     images.save(target)
     images.close()
     return target
+
+
+def camera_photo(source: Path, pitch: float, yaw: float = 0.0, roll: float = 0.0,
+                 fill: float = 0.8, desk: str = "dark", shift: tuple[float, float] = (0, 0),
+                 size: tuple[int, int] = (1200, 1600), dpi: int = 110) -> tuple[Any, Any]:
+    """A phone photo of the first page of ``source`` as a BGR image, taken by a pinhole
+    camera with a phone's focal length (26 mm in 35 mm terms, principal point in the
+    middle) turned by ``pitch``, ``yaw`` and ``roll`` degrees, at a distance where the
+    sheet's height is ``fill`` of the photo's (above 1 the sheet runs out of it);
+    ``shift`` moves the sheet off the camera's axis (millimetres).  ``desk`` is "dark"
+    or "light" (a light grey table).  Returns the image and the true corners of the
+    sheet in its pixels (top-left, top-right, bottom-right, bottom-left), which may lie
+    outside it.  Needs OpenCV and NumPy."""
+    import math
+
+    import cv2
+    import numpy as np
+
+    w, h = size
+    focal = 26 / 43.27 * math.hypot(w, h)
+    p, y, r = (math.radians(v) for v in (pitch, yaw, roll))
+    rx = np.array([[1, 0, 0], [0, math.cos(p), -math.sin(p)], [0, math.sin(p), math.cos(p)]])
+    ry = np.array([[math.cos(y), 0, math.sin(y)], [0, 1, 0], [-math.sin(y), 0, math.cos(y)]])
+    rz = np.array([[math.cos(r), -math.sin(r), 0], [math.sin(r), math.cos(r), 0], [0, 0, 1]])
+    turn = rz @ ry @ rx
+    sheet_mm = np.array([[-105, -148.5, 0], [105, -148.5, 0], [105, 148.5, 0], [-105, 148.5, 0]])
+
+    def project(distance: float) -> Any:
+        points = (turn @ sheet_mm.T).T + [shift[0], shift[1], distance]
+        return np.c_[focal * points[:, 0] / points[:, 2] + w / 2,
+                     focal * points[:, 1] / points[:, 2] + h / 2]
+
+    distance = 400.0
+    for _ in range(30):
+        corners = project(distance)
+        distance *= (corners[:, 1].max() - corners[:, 1].min()) / (fill * h)
+    corners = project(distance)
+    with pymupdf.open(source) as d:
+        pix = d[0].get_pixmap(dpi=dpi, alpha=False)
+    page = np.frombuffer(pix.samples, np.uint8).reshape(pix.height, pix.width, 3)[:, :, ::-1]
+    m = cv2.getPerspectiveTransform(
+        np.float32([[0, 0], [pix.width, 0], [pix.width, pix.height], [0, pix.height]]),
+        np.float32(corners))
+    photo = np.full((h, w, 3), (55, 65, 80) if desk == "dark" else (212, 214, 218), np.float32)
+    warped = cv2.warpPerspective(np.ascontiguousarray(page).astype(np.float32), m, (w, h),
+                                 flags=cv2.INTER_AREA, borderMode=cv2.BORDER_CONSTANT,
+                                 borderValue=(-1, -1, -1))
+    on_sheet = warped[:, :, 0] >= 0
+    photo[on_sheet] = warped[on_sheet]
+    rng = np.random.default_rng(1)
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    light = 1.0 - 0.2 * np.hypot(xx, yy) / math.hypot(w, h)  # darker towards one corner
+    photo = cv2.GaussianBlur(photo * 0.96 * light[:, :, None], (0, 0), 0.8)
+    photo = np.clip(photo + rng.normal(0, 3.0, photo.shape), 0, 255).astype(np.uint8)
+    return photo, corners

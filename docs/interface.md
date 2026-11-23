@@ -8,7 +8,7 @@ Every answer carries `interface`. It goes up when something a caller relies on c
 that breaks it: a field or a kind of error removed or renamed, a meaning changed. Within one
 interface, new fields, new options and new kinds of error may come; a caller ignores fields it
 does not know and treats an unknown kind of error like any other (its message says what
-happened). Releases are tagged (`v0.4.0`); pin a tag, not a branch.
+happened). Releases are tagged (`v0.5.0`); pin a tag, not a branch.
 
 **From interface 1:** the configuration (`<stem>.optdoc.json`, `--config`, answer field `config`)
 takes the place of the plan (`<stem>.plan.json`, `--plan`, answer field `plan`), and the kind of
@@ -37,12 +37,12 @@ Every answer has these two fields:
 | field | example | meaning |
 |---|---|---|
 | `interface` | `2` | the version of this description |
-| `made_with` | `"optdoc 0.4.0"` | the program and its version, for the record of what made a file |
+| `made_with` | `"optdoc 0.5.0"` | the program and its version, for the record of what made a file |
 
 ## `readers`: what this installation can do
 
 ```json
-{"interface": 2, "made_with": "optdoc 0.4.0", "version": "0.4.0",
+{"interface": 2, "made_with": "optdoc 0.5.0", "version": "0.5.0",
  "readers": ["rapidocr", "tesseract"], "clean_up": true, "heic": true, "tables": true,
  "window": true}
 ```
@@ -86,7 +86,7 @@ then decides every setting; `--reader`, `--languages`, `--paper`, `--photo`, `--
 The answer:
 
 ```json
-{"interface": 2, "made_with": "optdoc 0.4.0",
+{"interface": 2, "made_with": "optdoc 0.5.0",
  "pdf": "<folder>/<stem>.pdf", "reading": "<folder>/<stem>.reading.json",
  "markdown": "<folder>/<stem>.md", "config": "<folder>/<stem>.optdoc.json",
  "pages": 2, "ocr_pages": [1, 2], "pages_without_text": [], "cleaned_up": [1, 2],
@@ -112,9 +112,13 @@ folder).
 **Photos and scans.** A page without text is cleaned up by the configuration given, else by
 optdoc's suggestion. The suggestion tells a photographed page from a scanned one by the page
 itself, in an image file and inside a PDF alike (photos bound into one PDF): a photo shows the
-sheet on something darker than paper (a desk), and that sheet is found and unwarped. A frame or a
-ruled table on a scan has paper around it and is never taken for the sheet. `--photo` takes every
-page without text for a photo, `--scan` for a scan.
+sheet on something darker than paper (a desk, also a light grey table), and that sheet is found
+and unwarped to how it looks from straight above, in its true proportions (from the perspective
+of its corners; snapped to A4, A5, Letter or Legal when within 3 %). A corner may lie outside the
+photo; where a whole edge of the sheet does, it is reconstructed from the others, and what the
+photo did not show stays white. A frame or a ruled table, on a scan or on a photographed sheet,
+has paper around it and is never taken for the sheet. `--photo` takes every page without text for
+a photo, `--scan` for a scan. In the window the sheet's corners can be dragged by hand.
 
 **Orientation.** An image is turned as its EXIF orientation says; a PDF page turned by `/Rotate`
 is set upright without touching its picture (a JPEG stays byte for byte). The PDF that optdoc
@@ -147,8 +151,9 @@ and asks to bring it to the front. It starts as `prepare` would (optdoc's sugges
 given), so that **Apply** at once gives the same files as `prepare`. Two tabs:
 
 - **Clean up:** the page before and after, every step switchable with its strength, rotation,
-  areas erased by dragging (Cmd/Ctrl+Z takes them back), the suggestion restored, a page left as
-  it came, the steps copied to every page, the orientation detected.
+  the sheet's four corners dragged on the page before (also where optdoc found none), areas erased
+  by dragging on the page after (Cmd/Ctrl+Z takes them back), the suggestion restored, a page left
+  as it came, the steps copied to every page, the orientation detected.
 - **Check the text:** the page as OCR read it, words read with little confidence marked yellow, a
   click on a word selects it in the text; the text beside it, to be corrected by hand. A
   correction goes into the PDF's text layer, the reading (as words `"by": "person"`) and the
@@ -170,7 +175,7 @@ caller waits until it is closed. It keeps no settings of its own and writes noth
 ## The configuration: `optdoc-config`, version 1
 
 ```json
-{"format": "optdoc-config", "version": 1, "made_with": "optdoc 0.4.0",
+{"format": "optdoc-config", "version": 1, "made_with": "optdoc 0.5.0",
  "source": {"sha256": "…", "bytes": 245678, "suffix": ".jpg"},
  "options": {"reader": "auto", "languages": null, "tables": true, "paper": "a4", "photo": null,
              "clean_up": true, "structure": true, "dpi": 300},
@@ -197,7 +202,7 @@ the bytes for `prepare`, `prepare --config` with the file and with the PDF, and 
 ## Failures
 
 ```json
-{"interface": 2, "made_with": "optdoc 0.4.0", "error": "unsupported",
+{"interface": 2, "made_with": "optdoc 0.5.0", "error": "unsupported",
  "details": {"suffix": ".docx"},
  "message": {"en": "optdoc cannot open files of type .docx.",
              "de": "Dateien vom Typ .docx kann optdoc nicht öffnen."}}
@@ -234,7 +239,7 @@ The same kinds and wording are there for programs that use optdoc as a Python li
 ## The reading: `optdoc-reading`, version 1
 
 ```json
-{"format": "optdoc-reading", "version": 1, "made_with": "optdoc 0.4.0",
+{"format": "optdoc-reading", "version": 1, "made_with": "optdoc 0.5.0",
  "reader": "rapidocr", "source": "<file name>", "plan": {"1": {"…": "…"}},
  "pages": [{"page": 1, "width": 595.28, "height": 841.89, "source": "ocr",
             "text": "Kalium\t5,8\tmmol/l\t3,5 - 5,1\tH\n…", "markdown": "…",

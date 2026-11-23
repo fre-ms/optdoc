@@ -220,15 +220,35 @@ def _text_only(bw: Any) -> Any:
     return out if out.any() else bw
 
 
-def find_corners(image: Any, scale: float = 1.0) -> list[Corner] | None:
-    """The four corners of a sheet photographed against a background, ordered
-    top-left, top-right, bottom-right, bottom-left, in points (pixels / ``scale``);
-    None when no convincing quadrilateral is found (a scan that fills the image)."""
+def _content_box(grey: Any) -> tuple[int, int, int, int]:
+    """``(x0, y0, x1, y1)`` of the picture on a rendered page: without the even white
+    bars that placing a photo on paper adds above and below or left and right.  A
+    photographed row or column is never one even white; a bar is."""
+    h, w = grey.shape
+
+    def span(bars: Any) -> tuple[int, int]:
+        n = len(bars)
+        a, b = 0, n
+        while a < n and bars[a]:
+            a += 1
+        while b > a and bars[b - 1]:
+            b -= 1
+        return a, b
+
+    y0, y1 = span(grey.min(axis=1) >= 250)
+    x0, x1 = span(grey.min(axis=0) >= 250)
+    if (x1 - x0) * (y1 - y0) < 0.3 * w * h:  # blank or nearly so: the whole page
+        return 0, 0, w, h
+    return int(x0), int(y0), int(x1), int(y1)
+
+
+def _quad_from_edges(grey: Any) -> Any:
+    """The sheet as the largest four-cornered outline among the edges, all of it inside
+    the picture; None when there is none.  Precise where it works: a sheet whole in the
+    picture, on something that sets it off."""
     import cv2
     import numpy as np
 
-    grey_full = _grey(image)
-    grey, f = _shrunk(grey_full, 1000)
     h, w = grey.shape
     blurred = cv2.GaussianBlur(grey, (5, 5), 0)
     edges = cv2.Canny(blurred, 50, 150)
@@ -245,51 +265,302 @@ def find_corners(image: Any, scale: float = 1.0) -> list[Corner] | None:
         if len(approx) == 4 and cv2.isContourConvex(approx) and area > best_area:
             best, best_area = approx.reshape(4, 2).astype(np.float64), area
     if best is None or best_area > 0.97 * w * h:
-        return None  # nothing, or the whole image: no correction needed
-    best /= f * scale
-    subtotal = best.sum(axis=1)
-    diff = np.diff(best, axis=1).ravel()
-    ordered = [best[np.argmin(subtotal)], best[np.argmin(diff)], best[np.argmax(subtotal)],
-                best[np.argmax(diff)]]
-    return [(float(x), float(y)) for x, y in ordered]
+        return None  # nothing, or the whole picture: no correction needed
+    return best
+
+
+def _paper_region(grey: Any) -> Any:
+    """The sheet as a region: the print closed over, bright paper set apart from what it
+    lies on (Otsu), the largest piece; None when no piece covers a fifth of the picture."""
+    import cv2
+    import numpy as np
+
+    h, w = grey.shape
+    k = max(3, int(0.015 * max(h, w)) | 1)
+    closed = cv2.morphologyEx(grey, cv2.MORPH_CLOSE,
+                              cv2.getStructuringElement(cv2.MORPH_RECT, (k, k)))
+    blurred = cv2.GaussianBlur(closed, (0, 0), 2)
+    _, mask = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(mask)
+    if n <= 1:
+        return None
+    best = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+    if stats[best, cv2.CC_STAT_AREA] < 0.2 * w * h:
+        return None
+    return (labels == best).astype(np.uint8) * 255
+
+
+def _crossing(a: Any, b: Any) -> Any:
+    """Where two lines (point, direction) meet; None for (nearly) parallel ones."""
+    import numpy as np
+
+    (p, d), (q, e) = a, b
+    det = d[0] * -e[1] - d[1] * -e[0]
+    if abs(det) < 0.2:  # less than about 12 degrees apart
+        return None
+    t = ((q[0] - p[0]) * -e[1] - (q[1] - p[1]) * -e[0]) / det
+    return np.array([p[0] + t * d[0], p[1] + t * d[1]])
+
+
+def _homogeneous(line: Any) -> Any:
+    """A line (point, direction) as homogeneous coefficients."""
+    import numpy as np
+
+    (x, y), (dx, dy) = line
+    return np.cross([x, y, 1.0], [x + dx, y + dy, 1.0])
+
+
+def _missing_edge(near: Any, middle: Any, far: Any, outline: Any, size: tuple[int, int]) -> Any:
+    """The edge of the sheet opposite ``middle`` when the photo cut it off: ``near`` and
+    ``far`` are the edges on either side of the gap (they converge towards ``middle`` or
+    away from it), ``middle`` the edge seen opposite.  In space the missing edge runs
+    parallel to ``middle``; its vanishing point lies on ``middle``'s line where the
+    direction is square to that of the side edges, for a phone's focal length
+    (PHONE_FOCAL).  Of the lines through that point the one is taken that keeps all of
+    the visible paper (``outline``) on the sheet: nothing seen is cut off, and what lies
+    beyond the photo becomes white."""
+    import numpy as np
+
+    w, h = size
+    focal = PHONE_FOCAL * float(np.hypot(w, h))
+    k = np.array([[focal, 0, w / 2], [0, focal, h / 2], [0, 0, 1.0]])
+    k_inv = np.linalg.inv(k)
+    omega = k_inv.T @ k_inv  # the image of the absolute conic
+    side_vanishing = np.cross(_homogeneous(near), _homogeneous(far))
+    other = np.cross(_homogeneous(middle), omega @ side_vanishing)
+    if abs(other[2]) > 1e-12:
+        other = other / other[2]
+    near_line, middle_line = _homogeneous(near), _homogeneous(middle)
+    start = np.cross(near_line, middle_line)
+    if abs(start[2]) < 1e-12:
+        return None
+    start = start / start[2]
+    direction = np.asarray(near[1], dtype=np.float64)
+    # where the line from the vanishing point through each visible point meets the near
+    # edge, as a distance from the corner with ``middle``; the farthest keeps all
+    best, best_t = None, 0.0
+    for x, y in outline[:: max(1, len(outline) // 400)]:
+        line = np.cross(other, [x, y, 1.0])
+        meet = np.cross(line, near_line)
+        if abs(meet[2]) < 1e-12:
+            continue
+        meet = meet[:2] / meet[2]
+        t = float(np.dot(meet - start[:2], direction))
+        if best is None or abs(t) > abs(best_t):
+            best, best_t = line, t
+    if best is None:
+        return None
+    # back to (point, direction): two points of the homogeneous line
+    a, b, c = best
+    if abs(b) > abs(a):
+        p0 = np.array([0.0, -c / b])
+    else:
+        p0 = np.array([-c / a, 0.0])
+    d = np.array([b, -a]) / np.hypot(a, b)
+    return p0, d
+
+
+def _sides(outline: Any, w: int, h: int) -> list[tuple[str, Any]]:
+    """The sheet's outline (``outline``, in order) as its sides round the sheet: runs
+    along the edge of the picture ("frame", None) and the straight edges between them
+    ("sheet", (point, direction)), each fitted to the outline points along its middle."""
+    import cv2
+    import numpy as np
+
+    margin = max(3.0, 0.004 * max(w, h))
+    shortest = 0.1 * min(w, h)
+    border = (outline[:, 0] <= margin) | (outline[:, 0] >= w - 1 - margin) \
+        | (outline[:, 1] <= margin) | (outline[:, 1] >= h - 1 - margin)
+    n = len(outline)
+    if border.all():
+        return [("frame", None)]
+    # start the round where a free run begins, so that no run is split at the seam
+    start = next((i for i in range(n) if not border[i] and border[i - 1]), 0)
+    order = np.roll(np.arange(n), -start)
+    runs: list[tuple[bool, list[int]]] = []
+    for i in order:
+        if runs and runs[-1][0] == bool(border[i]):
+            runs[-1][1].append(int(i))
+        else:
+            runs.append((bool(border[i]), [int(i)]))
+    sides: list[tuple[str, Any]] = []
+    for on_border, indices in runs:
+        if on_border:
+            if len(indices) > shortest / 4:
+                sides.append(("frame", None))
+            continue
+        run = outline[indices]
+        vertices = cv2.approxPolyDP(run.astype(np.float32).reshape(-1, 1, 2),
+                                    0.015 * max(w, h), False).reshape(-1, 2)
+        for p, q in zip(vertices[:-1], vertices[1:], strict=True):
+            p, q = p.astype(np.float64), q.astype(np.float64)
+            length = float(np.linalg.norm(q - p))
+            if length < shortest:
+                continue  # a bit of a corner, not an edge
+            direction = (q - p) / length
+            offsets = run - p
+            along = offsets @ direction
+            across = np.abs(offsets[:, 0] * direction[1] - offsets[:, 1] * direction[0])
+            near = (along > 0.1 * length) & (along < 0.9 * length) & (across < 2 * margin)
+            if near.sum() < 10:
+                continue
+            vx, vy, x0, y0 = cv2.fitLine(run[near].astype(np.float32), cv2.DIST_HUBER,
+                                         0, 0.01, 0.01).ravel()
+            line = (np.array([x0, y0], np.float64), np.array([vx, vy], np.float64))
+            if sides and sides[-1][0] == "sheet" \
+                    and abs(float(np.dot(sides[-1][1][1], line[1]))) > 0.995:
+                continue  # the same edge, broken by the approximation
+            sides.append(("sheet", line))
+    if len(sides) > 1 and sides[0][0] == sides[-1][0] == "sheet" \
+            and abs(float(np.dot(sides[0][1][1], sides[-1][1][1]))) > 0.995:
+        sides.pop()  # the round closed on the same edge
+    return sides
+
+
+def _quad_from_region(grey: Any) -> Any:
+    """The sheet's four corners from straight lines fitted to its visible edges; a
+    corner may lie outside the picture (a sheet cut off by it).  Where a whole edge of
+    the sheet is outside, it is reconstructed (:func:`_missing_edge`).  None when fewer
+    than three edges of the sheet are seen, or they make no plausible sheet."""
+    import cv2
+    import numpy as np
+
+    region = _paper_region(grey)
+    if region is None:
+        return None
+    h, w = grey.shape
+    contours, _ = cv2.findContours(region, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    outline = max(contours, key=cv2.contourArea).reshape(-1, 2).astype(np.float64)
+    sides = _sides(outline, w, h)
+    edges = [line for kind, line in sides if kind == "sheet"]
+    if len(edges) == 3:
+        # the missing edge belongs in a gap where the frame cut the sheet off, between
+        # the two edges most nearly parallel (the sheet's opposite sides)
+        gaps = [k for k in range(3) if _frame_in_gap([kind for kind, _ in sides], k)]
+        if not gaps:
+            return None
+        k = max(gaps, key=lambda g: abs(float(np.dot(edges[g][1], edges[(g + 1) % 3][1]))))
+        near, far, middle = edges[k], edges[(k + 1) % 3], edges[(k + 2) % 3]
+        missing = _missing_edge(near, middle, far, outline, (w, h))
+        if missing is None:
+            return None
+        edges.insert(k + 1, missing)
+    if len(edges) != 4:
+        return None
+    corners = [_crossing(edges[k - 1], edges[k]) for k in range(4)]
+    if any(c is None for c in corners):
+        return None
+    quad = np.array(corners)
+    inside = (quad[:, 0] > -0.6 * w) & (quad[:, 0] < 1.6 * w) & (quad[:, 1] > -0.6 * h) \
+        & (quad[:, 1] < 1.6 * h)
+    if not inside.all() or not cv2.isContourConvex(quad.astype(np.float32)):
+        return None
+    if cv2.contourArea(quad.astype(np.float32)) < 0.2 * w * h:
+        return None
+    return quad
+
+
+def _frame_in_gap(kinds: list[str], k: int) -> bool:
+    """True when the frame of the picture lies between the ``k``-th sheet edge and the
+    next one (round the sheet)."""
+    sheet = [i for i, kind in enumerate(kinds) if kind == "sheet"]
+    i, stop = (sheet[k] + 1) % len(kinds), sheet[(k + 1) % len(sheet)]
+    while i != stop:
+        if kinds[i] == "frame":
+            return True
+        i = (i + 1) % len(kinds)
+    return False
+
+
+def _ordered(quad: Any) -> Any:
+    """Four points ordered top-left, top-right, bottom-right, bottom-left."""
+    import numpy as np
+
+    subtotal = quad.sum(axis=1)
+    diff = np.diff(quad, axis=1).ravel()
+    return np.array([quad[np.argmin(subtotal)], quad[np.argmin(diff)],
+                     quad[np.argmax(subtotal)], quad[np.argmax(diff)]])
+
+
+def _sheet(image: Any) -> tuple[Any, Any, float, tuple[int, int, int, int]]:
+    """The sheet's corners in the shrunk picture (or None), the shrunk picture, its
+    scale against the image, and the picture's box on the image."""
+    grey_full = _grey(image)
+    box = _content_box(grey_full)
+    x0, y0, x1, y1 = box
+    grey, f = _shrunk(grey_full[y0:y1, x0:x1], 1000)
+    quad = _quad_from_edges(grey)
+    if quad is not None and not _on_a_desk(grey, quad):
+        quad = None  # a frame or a ruled table with paper around it, not the sheet
+    if quad is None:
+        quad = _quad_from_region(grey)
+    return (None if quad is None else _ordered(quad)), grey, f, box
+
+
+def _in_points(quad: Any, f: float, box: tuple[int, int, int, int], scale: float) -> list[Corner]:
+    return [(float((x / f + box[0]) / scale), float((y / f + box[1]) / scale)) for x, y in quad]
+
+
+def find_corners(image: Any, scale: float = 1.0) -> list[Corner] | None:
+    """The four corners of a sheet photographed against a background, ordered
+    top-left, top-right, bottom-right, bottom-left, in points (pixels / ``scale``);
+    a corner may lie outside the picture when the photo cuts the sheet off.  None when
+    no convincing sheet is found (a scan that fills the image).
+
+    Two searches: the largest four-cornered outline among the edges (precise, needs the
+    whole sheet in the picture), else straight lines fitted to the visible edges of the
+    paper as a region (a corner cut off, a desk little darker than paper).  The white
+    bars that placing a photo on paper adds are no part of the picture."""
+    quad, _grey_shrunk, f, box = _sheet(image)
+    return None if quad is None else _in_points(quad, f, box, scale)
 
 
 def _on_a_desk(grey: Any, quad: Any) -> bool:
-    """True when what lies around the quadrilateral (pixel corners of ``grey``) is
-    clearly darker than the paper just inside its edge: a desk, a table top, a hand.
-    Around a frame or a ruled table on a scan lies paper, printed or bare, as bright as
-    inside; unwarping to such a frame would cut the page or change its shape."""
+    """True when what lies just outside the quadrilateral (pixel corners of ``grey``,
+    outside the picture or not) is clearly darker than the paper just inside its edge:
+    a desk, a table top, a hand.  Just outside a frame or a ruled table lies paper, on a
+    scan as on a photographed sheet, as bright as inside; unwarping to such a frame
+    would cut the page or change its shape.  Only a narrow ring counts: further out, a
+    desk around the sheet would make a table on it look like a sheet on a desk."""
     import cv2
     import numpy as np
 
     h, w = grey.shape
     inside = np.zeros((h, w), np.uint8)
-    cv2.fillConvexPoly(inside, quad.astype(np.int32), 255)
+    cv2.fillConvexPoly(inside, np.round(quad).astype(np.int32), 255)
     edge = max(3, int(0.02 * min(h, w)))
-    kernel = np.ones((2 * edge + 1, 2 * edge + 1), np.uint8)
-    band = cv2.subtract(inside, cv2.erode(inside, kernel))  # the margin just inside the edge
-    outside = cv2.dilate(inside, kernel) == 0
-    if outside.sum() < 0.01 * h * w or not band.any():
+    gap = max(1, edge // 3)  # the edge itself is blurred: left out on both sides
+
+    def square(n: int) -> Any:
+        return np.ones((2 * n + 1, 2 * n + 1), np.uint8)
+
+    core = cv2.erode(inside, square(gap))
+    band = cv2.subtract(core, cv2.erode(core, square(edge)))  # paper just inside the edge
+    near = cv2.dilate(inside, square(gap))
+    ring = cv2.subtract(cv2.dilate(near, square(edge)), near)  # what lies just outside
+    if np.count_nonzero(ring) < 0.002 * h * w or not band.any():
         return False
-    paper = float(np.median(grey[band > 0]))
-    return float(np.median(grey[outside])) < paper - 30
+    return float(np.median(grey[ring > 0])) < float(np.median(grey[band > 0])) - DESK_DARKER
+
+
+DESK_DARKER = 15  # grey levels a desk is darker than the paper at least (measured on
+# invented photos: a light grey table 34 to 37 below the paper, dark and wooden desks 147
+# to 169; just outside the frame of a ruled table, on a scan, a digital page or a
+# photographed sheet, the paper is brighter than inside, by 16 to 31)
 
 
 def sheet_in_photo(image: Any, scale: float = 1.0) -> list[Corner] | None:
     """The corners of the sheet when ``image`` shows one lying on something darker than
     paper, as :func:`find_corners` gives them; None for a page that fills the image, and
     None when the quadrilateral has paper around it (a frame or a ruled table on a scan,
-    which :func:`find_corners` takes for a sheet).  This is what tells a photographed
-    page from a scanned one, also inside a PDF.  A sheet on a white desk counts as a
-    scan: it is not unwarped, which costs less than a page cut to a frame."""
-    corners = find_corners(image, scale)
-    if corners is None:
+    which the edge search takes for a sheet).  This is what tells a photographed page
+    from a scanned one, also inside a PDF.  A sheet on a desk as white as paper counts
+    as a scan: it is not unwarped, which costs less than a page cut to a frame."""
+    quad, grey, f, box = _sheet(image)
+    if quad is None or not _on_a_desk(grey, quad):
         return None
-    import numpy as np
-
-    grey, f = _shrunk(_grey(image), 1000)
-    quad = np.array(corners, dtype=np.float64) * scale * f
-    return corners if _on_a_desk(grey, quad) else None
+    return _in_points(quad, f, box, scale)
 
 
 def dark_borders(image: Any, width: float = 0.04, limit: int = 90) -> bool:
@@ -482,21 +753,88 @@ def describe(a: CleanupPlan, language: str = "en") -> str:
 # -- application ---------------------------------------------------------------------------------
 
 
+# width / height of the paper sizes a sheet is snapped to when its measured proportions
+# come within SNAP of one (portrait; landscape is the inverse)
+PAPER_RATIOS = (2 ** -0.5, 8.5 / 11, 8.5 / 14)
+SNAP = 0.03
+
+
+def _side_aspect(q: Any) -> float:
+    """Width / height from the longer of each pair of opposite sides: right for a sheet
+    seen head-on, too wide or too narrow the more it is seen at a slant."""
+    import numpy as np
+
+    width = max(np.linalg.norm(q[1] - q[0]), np.linalg.norm(q[2] - q[3]))
+    height = max(np.linalg.norm(q[3] - q[0]), np.linalg.norm(q[2] - q[1]))
+    return float(width / height)
+
+
+# a phone's main camera: 26 mm in 35 mm terms, over the 43.27 mm diagonal of 35 mm film,
+# as a share of the picture's diagonal
+PHONE_FOCAL = 26 / 43.27
+
+
+def sheet_aspect(q: Any, centre: tuple[float, float]) -> float:
+    """The true width / height of a rectangle seen at a slant, from its four corners
+    (pixels, top-left, top-right, bottom-right, bottom-left) and the picture's centre,
+    after Zhang and He ("Whiteboard scanning and image enhancement", 2007): with the
+    camera's focal length, one view of a rectangle gives its proportions.  The focal
+    length comes from the corners themselves where both pairs of edges converge enough
+    to tell it; else a phone's (PHONE_FOCAL).  Within SNAP of a paper size, that size.
+
+    Measured on simulated photos by phones of 24 to 28 mm, corners 3 to 8 pixels off,
+    before snapping: median under 1 %, at most 5 % (from the sides alone, as before: up
+    to 43 %).  With a twofold tele lens, where the corners do not tell the focal length,
+    up to 15 %."""
+    import numpy as np
+
+    q = np.asarray(q, dtype=np.float64)
+    m1, m2, m3, m4 = (np.array([x - centre[0], y - centre[1], 1.0])
+                      for x, y in (q[3], q[2], q[0], q[1]))
+    diagonal = float(np.hypot(*(2 * np.asarray(centre))))
+    focal = PHONE_FOCAL * diagonal
+    with np.errstate(divide="ignore", invalid="ignore"):
+        k2 = np.dot(np.cross(m1, m4), m3) / np.dot(np.cross(m2, m4), m3)
+        k3 = np.dot(np.cross(m1, m4), m2) / np.dot(np.cross(m3, m4), m2)
+        n2, n3 = k2 * m2 - m1, k3 * m3 - m1
+        f2 = -(n2[0] * n3[0] + n2[1] * n3[1]) / (n2[2] * n3[2])
+        # how far each pair of edges converges: small for edges that stay parallel,
+        # where the corners leave the focal length open
+        converging = min(abs(n2[2]) / np.hypot(n2[0], n2[1]),
+                         abs(n3[2]) / np.hypot(n3[0], n3[1])) * diagonal
+        if np.isfinite(f2) and converging > 0.25 \
+                and (0.25 * diagonal) ** 2 < f2 < (3 * diagonal) ** 2:
+            focal = float(np.sqrt(f2))
+        ratio2 = (n2[0] ** 2 + n2[1] ** 2 + focal ** 2 * n2[2] ** 2) \
+            / (n3[0] ** 2 + n3[1] ** 2 + focal ** 2 * n3[2] ** 2)
+    aspect = float(np.sqrt(ratio2)) if np.isfinite(ratio2) and ratio2 > 0 else _side_aspect(q)
+    for paper in PAPER_RATIOS:
+        for ratio in (paper, 1 / paper):
+            if abs(aspect / ratio - 1) < SNAP:
+                return ratio
+    return aspect
+
+
 def _unwarp(image: Any, corners: list[Corner], scale: float) -> Any:
+    """The sheet within ``corners`` (points; ``scale`` pixels per point) as seen from
+    straight above, in its true proportions (:func:`sheet_aspect`); what lies outside
+    the picture (a corner cut off) is white."""
     import cv2
     import numpy as np
 
-    source = np.array(corners, dtype=np.float32) * scale
-    (ol, orr, ur, ul) = source
-    width = int(max(np.linalg.norm(orr - ol), np.linalg.norm(ur - ul)))
-    height = int(max(np.linalg.norm(ul - ol), np.linalg.norm(ur - orr)))
+    source = np.array(corners, dtype=np.float64) * scale
+    x0, y0, x1, y1 = _content_box(_grey(image))
+    aspect = sheet_aspect(source, ((x0 + x1) / 2, (y0 + y1) / 2))
+    height = int(max(np.linalg.norm(source[3] - source[0]), np.linalg.norm(source[2] - source[1])))
+    width = int(round(height * aspect))
     if width < 10 or height < 10:
         return image
     target = np.array([[0, 0], [width - 1, 0], [width - 1, height - 1], [0, height - 1]],
                     dtype=np.float32)
-    m = cv2.getPerspectiveTransform(source, target)
+    m = cv2.getPerspectiveTransform(source.astype(np.float32), target)
+    white = (255,) * (1 if image.ndim == 2 else image.shape[2])
     return cv2.warpPerspective(image, m, (width, height), flags=cv2.INTER_CUBIC,
-                               borderMode=cv2.BORDER_REPLICATE)
+                               borderMode=cv2.BORDER_CONSTANT, borderValue=white)
 
 
 def _rotate(image: Any, angle: float) -> Any:
@@ -698,6 +1036,23 @@ def _image_only(op: Callable[[Any], Any]) -> Step:
 def _with_strength(op: Callable[[Any, int], Any], switch: str) -> Step:
     """An operation on the image at the strength the plan holds in ``switch``."""
     return lambda image, a, scale: op(image, getattr(a, switch))
+
+
+def turn_points(points: list[Corner], rotation: int, size: tuple[float, float]) -> list[Corner]:
+    """Points on a page of ``size`` (width, height) where they lie once the page is
+    turned clockwise by ``rotation`` (0, 90, 180, 270), as :func:`_step_rotation` turns
+    it.  Corners are kept on the turned page; this moves them with a turn."""
+    w, h = size
+    turned: list[Corner] = []
+    for x, y in points:
+        if rotation == 90:
+            x, y = h - y, x
+        elif rotation == 180:
+            x, y = w - x, h - y
+        elif rotation == 270:
+            x, y = y, w - x
+        turned.append((float(x), float(y)))
+    return turned
 
 
 def _step_rotation(image: Any, a: CleanupPlan, scale: float) -> Any:

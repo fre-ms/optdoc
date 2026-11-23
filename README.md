@@ -12,7 +12,7 @@ which pseudonymises patient documents, and medorello, a records app that files d
 values from them, such as the results printed on a photographed laboratory report. optdoc itself knows
 nothing about either and works on any kind of document.
 
-**Status: pre-alpha (0.4.0).** The code comes from PseudonyMed, where it has been tested for weeks, with its
+**Status: pre-alpha (0.5.0).** The code comes from PseudonyMed, where it has been tested for weeks, with its
 history. Since 0.1.0 its identifiers are English (`docs/renames-0.1.0.md` lists the old German names); since
 0.2.0 its command line is a described interface ([docs/interface.md](docs/interface.md)) and it can be built
 as a standalone program ([docs/sidecar.md](docs/sidecar.md)); since 0.4.0 it has a window to correct the
@@ -25,8 +25,10 @@ clean-up and the text by hand, and a configuration from which a result can be ma
   default, or its own size), honouring its EXIF orientation; a PDF page turned by `/Rotate` is set upright
   without touching its picture.
 - **Cleans up** image-only pages, with an automatic suggestion per page: perspective correction of a
-  photographed sheet (finds its corners; tells a photographed page from a scanned one by the page itself,
-  also inside a PDF of bound photos, and never cuts a scan to the frame of a table), straightening, rotation by quarter turns, dark scanner borders,
+  photographed sheet (finds its corners, also one outside the photo or on a light table, and gives the
+  sheet its true proportions; tells a photographed page from a scanned one by the page itself, also inside
+  a PDF of bound photos, and never cuts a page to the frame of a table), straightening, rotation by quarter
+  turns, dark scanner borders,
   coloured ink (stamps, highlighter), noise, contrast, sharpening, uneven background, ruled and table lines,
   upscaling for low-resolution images, masks. Every step can be switched and tuned.
 - **Reads** with [RapidOCR](https://github.com/RapidAI/RapidOCR) (ONNX models in the wheel, no download) or
@@ -43,7 +45,7 @@ clean-up and the text by hand, and a configuration from which a result can be ma
   gets a row of a table as one line; every character as read, "≤" and "↑" too), the reading as JSON, the
   text as Markdown, and the configuration.
 - **Lets a person correct it** in a window (extra `gui`, Qt): the clean-up of every page before and after,
-  each step switchable, and the text read by OCR beside the page, uncertain words marked, to be corrected
+  each step switchable, the sheet's corners to drag, and the text read by OCR beside the page, uncertain words marked, to be corrected
   by hand. A correction reaches the PDF's text layer, the reading and the Markdown. The work can be saved
   and taken up again later.
 - **Makes the same result again.** The configuration (`<name>.optdoc.json`, also inside the PDF) holds
@@ -53,7 +55,10 @@ clean-up and the text by hand, and a configuration from which a result can be ma
 
 Decisions in the clean-up are measured, not guessed: binarising a page (Sauvola) looked good and made
 RapidOCR nearly blind, so optdoc does not do it; straightening a noisy scan by less than about one degree
-costs more than it gains, so the suggestion leaves it alone. The tests guard both.
+costs more than it gains, so the suggestion leaves it alone; neural unwarping (UVDoc) bent the tables of
+photographed laboratory reports, while a sheet unwarped by its corners in its true proportions read as well
+as with the true corners (1525 and 1522 of 1530 numbers on 30 invented photos). The tests guard the
+first two and the unwarping at a slant.
 
 ## Install
 
