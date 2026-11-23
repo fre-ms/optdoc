@@ -3,15 +3,19 @@
 
 A page with a text layer is read as it is.  A page without one (a scan, a photo) gets
 the clean-up plan: the one given, else the automatic suggestion of
-:func:`optdoc.cleanup.suggest`.  The cleaned-up image replaces the page, so that
-OCR, the output and anything a caller does afterwards (redaction, for instance) see
-the same page.  Upscaling is not baked into the page; such pages are read by OCR at
-the higher resolution instead.
+:func:`optdoc.cleanup.suggest`, which tells a photographed page from a scanned one by
+the page itself, inside a PDF too (a photo bound into one).  The cleaned-up image
+replaces the page, so that OCR, the output and anything a caller does afterwards
+(redaction, for instance) see the same page.  Upscaling is not baked into the page;
+such pages are read by OCR at the higher resolution instead.  The pages are done one
+after the other, each cleaned up and read before the next, so that a caller can be
+told how far the work has come.
 """
 
 from __future__ import annotations
 
 import functools
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -19,7 +23,8 @@ import pymupdf
 
 from optdoc import cleanup
 from optdoc import ocr as ocrlib
-from optdoc.loading import HEIC_SUFFIXES, IMAGE_SUFFIXES, open_document
+from optdoc.errors import OptdocError
+from optdoc.loading import open_document
 from optdoc.pagetext import PageText, read_text_layer
 from optdoc.structure import Structure, analyse_page_structure
 
@@ -27,30 +32,29 @@ SUGGESTION_DPI = 150  # resolution the clean-up suggestion looks at a page with
 MAX_PIXELS_UPSCALED = 9000  # cap for the OCR image of an upscaled page
 
 
-def is_photo(path: str | Path) -> bool:
-    """True for an image file (photo, scan as JPEG, PNG, HEIC) rather than a PDF."""
-    return Path(path).suffix.lower() in IMAGE_SUFFIXES | HEIC_SUFFIXES
+Progress = Callable[[int, int], None]  # page (from 1) about to be done, and how many
 
 
-def suggestion_for(page: pymupdf.Page, photo: bool) -> cleanup.CleanupPlan:
-    """The automatic clean-up suggestion for one image-only page."""
+def suggestion_for(page: pymupdf.Page, photo: bool | None = None) -> cleanup.CleanupPlan:
+    """The automatic clean-up suggestion for one image-only page; ``photo`` as in
+    :func:`optdoc.cleanup.suggest` (None: told by the page)."""
     image, scale = cleanup.render(page, SUGGESTION_DPI)
     return cleanup.suggest(image, photo, scale, cleanup.native_dpi(page))
 
 
-def plan_for(doc: pymupdf.Document, photo: bool) -> dict[int, cleanup.CleanupPlan]:
-    """The suggestions for the image-only pages of ``doc``, active ones only; empty
-    without OpenCV."""
-    if not cleanup.available():
-        return {}
-    plan: dict[int, cleanup.CleanupPlan] = {}
-    for i, page in enumerate(doc):
-        if read_text_layer(page, i).has_text_layer:
-            continue
+def _plan_of_page(page: pymupdf.Page, number: int,
+                  plan: dict[int, cleanup.CleanupPlan] | None, clean_up: bool,
+                  photo: bool | None) -> cleanup.CleanupPlan | None:
+    """The clean-up of one page: its entry in the plan given, else the suggestion for an
+    image-only page (with OpenCV, unless ``clean_up`` is off); None when nothing would
+    change."""
+    if plan is not None:
+        a = plan.get(number)
+    elif clean_up and cleanup.available() and not read_text_layer(page, number).has_text_layer:
         a = suggestion_for(page, photo)
-        if a.active:
-            plan[i] = a
-    return plan
+    else:
+        a = None
+    return a if a is not None and a.active else None
 
 
 @dataclass
@@ -126,26 +130,39 @@ def read(
     clean_up: bool = True,
     dpi: int = ocrlib.OCR_DPI,
     with_structure: bool = True,
+    photo: bool | None = None,
+    progress: Progress | None = None,
 ) -> Reading:
     """Read a PDF or an image.
 
     ``reader`` is the OCR engine ("auto", "rapidocr", "tesseract", "none"), ``languages``
     its language packs, ``tables`` Tesseract's second pass for table grids, ``paper``
-    the paper size an image is placed on (``None`` keeps the image's own size).  ``plan``
-    is the clean-up per page number; without it the automatic suggestion is used, unless
-    ``clean_up`` is False.  ``with_structure`` gives OCR pages their structure."""
+    the paper size an image is placed on ("image" keeps the image's own size).  ``plan``
+    is the clean-up per page number (from 0); without it the automatic suggestion is
+    used, unless ``clean_up`` is False.  ``photo`` True takes every image-only page for a
+    photo, False for a scan; None (the default) tells by each page.  ``with_structure``
+    gives OCR pages their structure.  ``progress`` is called with the number of the page
+    about to be done (from 1) and the number of pages.
+
+    Raises :class:`~optdoc.errors.OptdocError` (an :class:`~optdoc.errors.OCRError` for
+    the engines); a plan that names a page the document does not have is a "bad-plan"."""
     source = Path(path)
-    engine = ocrlib.backend(reader, languages, tables=tables)
-    doc = open_document(source, paper)
+    doc = open_document(source, paper)  # first: a missing file is told before an engine starts
     try:
-        if plan is None:
-            plan = plan_for(doc, is_photo(source)) if clean_up else {}
-        plan = {n: a for n, a in plan.items() if a.active and 0 <= n < len(doc)}
-        for number in sorted(plan):
-            cleanup.replace_page(doc, number, plan[number], dpi)
-        pages = [_read_one(doc, i, engine, plan.get(i), dpi, with_structure)
-                 for i in range(len(doc))]
+        engine = ocrlib.backend(reader, languages, tables=tables)
+        if plan is not None and any(not 0 <= n < len(doc) for n in plan):
+            raise OptdocError("bad-plan", reason="page")
+        applied: dict[int, cleanup.CleanupPlan] = {}
+        pages = []
+        for number in range(len(doc)):
+            if progress is not None:
+                progress(number + 1, len(doc))
+            a = _plan_of_page(doc[number], number, plan, clean_up, photo)
+            if a is not None:
+                cleanup.replace_page(doc, number, a, dpi)
+                applied[number] = a
+            pages.append(_read_one(doc, number, engine, a, dpi, with_structure))
     except Exception:
         doc.close()
         raise
-    return Reading(source, doc, plan, pages, engine.name if engine else None)
+    return Reading(source, doc, applied, pages, engine.name if engine else None)

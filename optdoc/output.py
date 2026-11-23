@@ -1,9 +1,10 @@
 """What a reading leaves behind: a searchable PDF, the reading as JSON, the text as
 Markdown, and the clean-up plan that can make it again.
 
-The PDF is the cleaned-up document; every OCR word is laid invisibly (render mode 3)
-over the place where it is printed, so that a reader can search and select the text
-of a scan like that of a born-digital document.  The JSON names every word with its
+The PDF is the cleaned-up document; the OCR text is laid invisibly over the place where
+it is printed, line by line (:mod:`optdoc.textlayer`), so that a reader can search and
+select the text of a scan like that of a born-digital document, and a program that
+takes the text out gets a printed row as one line.  The JSON names every word with its
 box in page points and the engine's confidence; it is meant for programs in other
 languages (a records app, a laboratory reader) and says which version of optdoc and
 which engine made it.
@@ -17,13 +18,13 @@ from typing import Any
 
 import pymupdf
 
-from optdoc import __version__
+from optdoc import __version__, textlayer
+from optdoc.errors import OptdocError
 from optdoc.pagetext import PageText
 from optdoc.reading import PageReading, Reading
 
 FORMAT = "optdoc-reading"
 FORMAT_VERSION = 1
-FONT = "helv"
 
 
 def _word_box(page_text: PageText, a: int, b: int) -> pymupdf.Rect | None:
@@ -37,43 +38,6 @@ def _word_box(page_text: PageText, a: int, b: int) -> pymupdf.Rect | None:
     return word
 
 
-def _invisible_size(text: str, rect: pymupdf.Rect) -> float:
-    """The font size that makes ``text`` as wide as its box, so that selecting it in a
-    reader covers the printed word; capped a little above the box height."""
-    by_height = max(2.0, rect.height * 0.8)
-    unit = pymupdf.get_text_length(text, fontname=FONT, fontsize=1.0)
-    size = min(by_height * 1.15, rect.width / unit) if unit > 0 else by_height
-    return max(2.0, size)
-
-
-def _write_invisibly(page: pymupdf.Page, text: str, rect: pymupdf.Rect) -> bool:
-    """Write ``text`` invisibly over ``rect``; a glyph the base font lacks is replaced by
-    what it can encode.  False when there is nothing to write."""
-    if rect.is_empty or rect.height <= 0 or not text.strip():
-        return False
-    point = (rect.x0, rect.y1 - 0.22 * rect.height)
-    size = _invisible_size(text, rect)
-    try:
-        page.insert_text(point, text, fontsize=size, fontname=FONT, render_mode=3,
-                         overlay=True)
-    except Exception:
-        ersatz = text.encode("cp1252", "replace").decode("cp1252")
-        page.insert_text(point, ersatz, fontsize=size, fontname=FONT, render_mode=3,
-                         overlay=True)
-    return True
-
-
-def invisible_text_layer(page: pymupdf.Page, page_text: PageText) -> int:
-    """Lay the words of ``page_text`` invisibly onto ``page`` where they stand; returns the
-    number of words written."""
-    count = 0
-    for a, b in page_text.words():
-        bounds = _word_box(page_text, a, b)
-        if bounds is not None and _write_invisibly(page, page_text.text[a:b], bounds):
-            count += 1
-    return count
-
-
 def _words(page_text: PageText) -> list[dict[str, Any]]:
     """The words of a page with their boxes and, for OCR, the engine's confidence."""
     words_of_page = page_text.words()
@@ -83,7 +47,9 @@ def _words(page_text: PageText) -> list[dict[str, Any]]:
     for i, (a, b) in enumerate(words_of_page):
         bounds = _word_box(page_text, a, b)
         word: dict[str, Any] = {"text": page_text.text[a:b], "start": a, "end": b,
-                                "box": [round(v, 2) for v in bounds] if bounds else None}
+                                "box": ([round(v, 2) for v in (bounds.x0, bounds.y0, bounds.x1,
+                                                               bounds.y1)]
+                                        if bounds else None)}
         if confidences:
             word["confidence"] = round(confidences[i], 3)
         words.append(word)
@@ -131,9 +97,11 @@ def searchable_pdf(reading: Reading) -> bytes:
     """The cleaned-up document with an invisible text layer on every OCR page."""
     duplicate = pymupdf.open("pdf", reading.doc.tobytes())
     try:
+        font = None
         for s in reading.pages:
             if s.ocr:
-                invisible_text_layer(duplicate[s.number], s.text)
+                font = font or textlayer.add_font(duplicate)
+                textlayer.write_page(duplicate, duplicate[s.number], s.text, font)
         made_by = f"optdoc {__version__}"
         duplicate.set_metadata({"producer": made_by, "creator": made_by})
         return duplicate.tobytes(garbage=3, deflate=True)
@@ -143,9 +111,11 @@ def searchable_pdf(reading: Reading) -> bytes:
 
 def write(reading: Reading, folder: str | Path, stem: str | None = None) -> dict[str, Path]:
     """Write ``<stem>.pdf``, ``<stem>.reading.json``, ``<stem>.md`` and
-    ``<stem>.plan.json`` into ``folder`` (created when missing); returns the paths."""
+    ``<stem>.plan.json`` into ``folder`` (created when missing); returns the paths.
+    Nothing is written anywhere else.  Raises :class:`~optdoc.errors.OptdocError`:
+    "same-as-source" when the PDF would replace the document that was read,
+    "unwritable" when the folder cannot take the files."""
     target = Path(folder)
-    target.mkdir(parents=True, exist_ok=True)
     stem = stem or reading.source.stem
     paths = {
         "pdf": target / f"{stem}.pdf",
@@ -154,10 +124,18 @@ def write(reading: Reading, folder: str | Path, stem: str | None = None) -> dict
         "plan": target / f"{stem}.plan.json",
     }
     if paths["pdf"].resolve() == reading.source.resolve():
-        raise ValueError(f"the output would overwrite the source: {reading.source}")
-    paths["pdf"].write_bytes(searchable_pdf(reading))
-    paths["reading"].write_text(json.dumps(reading_as_dict(reading), ensure_ascii=False, indent=1),
-                                encoding="utf-8")
-    paths["markdown"].write_text(markdown(reading), encoding="utf-8")
-    paths["plan"].write_text(json.dumps(plan_as_dict(reading), indent=1), encoding="utf-8")
+        raise OptdocError("same-as-source")
+    contents = {  # made before anything is written, so that a failure leaves no half
+        "pdf": searchable_pdf(reading),
+        "reading": json.dumps(reading_as_dict(reading), ensure_ascii=False,
+                              indent=1).encode("utf-8"),
+        "markdown": markdown(reading).encode("utf-8"),
+        "plan": json.dumps(plan_as_dict(reading), indent=1).encode("utf-8"),
+    }
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        for key, data in contents.items():
+            paths[key].write_bytes(data)
+    except OSError as e:
+        raise OptdocError("unwritable") from e
     return paths

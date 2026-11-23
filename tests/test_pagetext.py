@@ -5,6 +5,7 @@ from __future__ import annotations
 import pymupdf
 import pytest
 
+from optdoc.errors import OptdocError
 from optdoc.pagetext import (
     PageText,
     _glyphs,
@@ -71,7 +72,7 @@ def test_dict_round_trip_and_check() -> None:
     assert s.uncertain_words == 1 and s.source == "ocr"
     assert PageText.from_dict(s.as_dict()) == s
     assert PageText.from_dict({"number": 0, "width": 1, "height": 2, "text": ""}).boxes == []
-    with pytest.raises(ValueError, match="page text 4"):
+    with pytest.raises(OptdocError, match="Page text 4"):
         PageText.from_dict(dict(raw, lines=[1, 1]))
 
 

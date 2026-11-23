@@ -12,7 +12,13 @@ The modules:
 - :mod:`optdoc.pagetext`: the page text with a box for every character;
 - :mod:`optdoc.structure`: lines, paragraphs, headings, lists and tables as Markdown;
 - :mod:`optdoc.alignment`: a corrected text laid back onto the OCR boxes;
-- :mod:`optdoc.settings`: the settings of the OCR layer.
+- :mod:`optdoc.reading`: the pipeline, page by page: open, clean up, read, structure;
+- :mod:`optdoc.output`: the searchable PDF, the reading as JSON, Markdown, the plan;
+- :mod:`optdoc.textlayer`: the invisible text layer, one line per OCR line;
+- :mod:`optdoc.errors`: the kinds of error and their wording in English and German;
+- :mod:`optdoc.offline`: no network, no telemetry;
+- :mod:`optdoc.settings`: the settings of the OCR layer;
+- :mod:`optdoc.cli` and :mod:`optdoc.bench`: the command line and the test bench.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

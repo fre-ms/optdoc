@@ -3,7 +3,7 @@ language packs it reads with.
 
 optdoc keeps no configuration file of its own.  An application that embeds it hands
 over its settings with :func:`set_settings` (any object with the three
-attributes will do); without that the environment decides:
+attributes or properties will do); without that the environment decides:
 
 ``OPTDOC_OCR``
     the engine "auto" stands for: ``rapidocr``, ``tesseract`` or ``none``.
@@ -21,11 +21,23 @@ from typing import Protocol
 
 
 class SettingsLike(Protocol):
-    """What the OCR layer reads from a settings object."""
+    """What the OCR layer reads from a settings object: only reads, so plain attributes
+    and properties (looked up anew on every access) will both do."""
 
-    ocr_backend: str
-    tesseract_path: str
-    tesseract_languages: str
+    @property
+    def ocr_backend(self) -> str:
+        """The engine "auto" stands for: "rapidocr", "tesseract", "none" or "auto"."""
+        ...
+
+    @property
+    def tesseract_path(self) -> str:
+        """The path of the Tesseract program; empty: look for it."""
+        ...
+
+    @property
+    def tesseract_languages(self) -> str:
+        """Tesseract's language packs joined by "+"; empty: what is installed."""
+        ...
 
 
 @dataclass

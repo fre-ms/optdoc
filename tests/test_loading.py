@@ -7,6 +7,7 @@ from pathlib import Path
 import pymupdf
 import pytest
 
+from optdoc.errors import OptdocError
 from optdoc.loading import PAPER_SIZES, open_document, paper_size
 
 
@@ -20,8 +21,9 @@ def _image(path: Path, width: int, height: int) -> Path:
 def test_paper_size_names() -> None:
     assert paper_size("A4") == PAPER_SIZES["a4"] and paper_size(None) == PAPER_SIZES["a4"]
     assert paper_size("US Letter") == PAPER_SIZES["letter"] and paper_size("image") is None
-    with pytest.raises(ValueError, match="paper size"):
+    with pytest.raises(OptdocError, match="paper size") as caught:
         paper_size("b5")
+    assert caught.value.kind == "paper" and caught.value.details == {"name": "b5"}
 
 
 def test_image_on_paper(tmp_path: Path) -> None:
@@ -38,5 +40,5 @@ def test_image_on_paper(tmp_path: Path) -> None:
     # as large as the image
     with open_document(portrait, "image") as doc, pymupdf.open(portrait) as raw:
         assert doc[0].rect == raw[0].rect and doc[0].rect.height == 2 * doc[0].rect.width
-    with pytest.raises(ValueError):
+    with pytest.raises(OptdocError):
         open_document(portrait, "b5")

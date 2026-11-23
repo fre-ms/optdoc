@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from optdoc import ocr as ocrlib
+from optdoc.errors import OptdocError
 from optdoc.loading import HEIC_SUFFIXES, IMAGE_SUFFIXES
 from optdoc.pagetext import PageText
 
@@ -206,7 +207,8 @@ def bench(folder: str | Path, readers: list[str] | None = None, clean_up: bool =
             try:
                 lines, confidence, summary = _read_lines(path, reader, clean_up)
             except Exception as error:  # the message may quote a path; only its kind leaves
-                entry["error"] = type(error).__name__
+                entry["error"] = (error.kind if isinstance(error, OptdocError)
+                                  else type(error).__name__)
                 result.documents.append(entry)
                 continue
             score = score_text(truth, lines)

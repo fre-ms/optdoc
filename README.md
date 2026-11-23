@@ -3,23 +3,28 @@
 optdoc makes photographed and scanned documents legible. It finds and straightens the page, evens out
 light and noise, reads the text with word boxes, gives it structure (paragraphs, lists, tables) and lays it
 back onto the page as an invisible text layer. The result is a searchable PDF and a machine-readable
-reading that other programs can build on. Everything runs on your own computer; nothing is sent anywhere.
+reading that other programs can build on. Everything runs on your own computer; nothing is sent anywhere
+(the command line refuses any attempt to reach the network, and switches off the telemetry ONNX Runtime
+would otherwise queue for Microsoft).
 
 It is the document layer of two applications by the same author: [PseudonyMed](https://github.com/fre-ms/PseudonyMed),
 which pseudonymises patient documents, and medorello, a records app that files documents and reads
 values from them, such as the results printed on a photographed laboratory report. optdoc itself knows
 nothing about either and works on any kind of document.
 
-**Status: pre-alpha (0.1.0).** The code comes from PseudonyMed, where it has been tested for weeks, with its
-history. Since 0.1.0 its identifiers are English (`docs/renames-0.1.0.md` lists the old German names). Expect
-the interface to grow with the items under *Planned*.
+**Status: pre-alpha (0.2.0).** The code comes from PseudonyMed, where it has been tested for weeks, with its
+history. Since 0.1.0 its identifiers are English (`docs/renames-0.1.0.md` lists the old German names); since
+0.2.0 its command line is a described interface ([docs/interface.md](docs/interface.md)) and it can be built
+as a standalone program ([docs/sidecar.md](docs/sidecar.md)). `CHANGELOG.md` lists the changes.
 
 ## What it does today
 
 - **Opens** PDFs and images (JPEG, PNG, TIFF, HEIC and more); an image is placed on a paper size (A4 by
-  default, or its own size), honouring its EXIF orientation.
+  default, or its own size), honouring its EXIF orientation; a PDF page turned by `/Rotate` is set upright
+  without touching its picture.
 - **Cleans up** image-only pages, with an automatic suggestion per page: perspective correction of a
-  photographed sheet (finds its corners), straightening, rotation by quarter turns, dark scanner borders,
+  photographed sheet (finds its corners; tells a photographed page from a scanned one by the page itself,
+  also inside a PDF of bound photos, and never cuts a scan to the frame of a table), straightening, rotation by quarter turns, dark scanner borders,
   coloured ink (stamps, highlighter), noise, contrast, sharpening, uneven background, ruled and table lines,
   upscaling for low-resolution images, masks. Every step can be switched and tuned; the plan is written
   out so that the same result can be made again.
@@ -29,8 +34,9 @@ the interface to grow with the items under *Planned*.
 - **Structures** the OCR text as Markdown: paragraphs re-joined, headings by size and weight, lists,
   tables from wide gaps.
 - **Writes** a searchable PDF (the cleaned-up pages with the recognised words laid invisibly over the printed
-  ones, so that selecting a word in a reader covers it), the reading as JSON, the text as Markdown, and the
-  clean-up plan.
+  ones, line by line, so that selecting a word in a reader covers it and a program that takes the text out
+  gets a row of a table as one line; every character as read, "≤" and "↑" too), the reading as JSON, the
+  text as Markdown, and the clean-up plan.
 
 Decisions in the clean-up are measured, not guessed: binarising a page (Sauvola) looked good and made
 RapidOCR nearly blind, so optdoc does not do it; straightening a noisy scan by less than about one degree
@@ -58,15 +64,24 @@ optdoc prepare photo.heic --out results/
 optdoc prepare scan.pdf --reader tesseract --languages deu+eng --plan results/scan.plan.json
 ```
 
-`prepare` writes `<name>.pdf`, `<name>.reading.json`, `<name>.md` and `<name>.plan.json` and answers in
-JSON on standard output, so that programs in any language can use optdoc as a helper. Errors go to standard
-error, end with exit status 2 and never quote the document. Options: `--reader auto|rapidocr|tesseract|none`,
-`--languages`, `--paper a4|a5|a3|letter|legal|image`, `--plan`, `--no-clean-up`, `--no-tables`,
-`--no-structure`.
+`prepare` writes `<name>.pdf`, `<name>.reading.json`, `<name>.md` and `<name>.plan.json` into the folder
+given and nowhere else. Every command answers with one JSON object on standard output, so that programs in
+any language can use optdoc as a helper; a failure too, with a fixed kind and its message in English and
+German, and exit status 2. No answer quotes a document or its path. Options: `--reader
+auto|rapidocr|tesseract|none`, `--languages`, `--paper a4|a5|a3|letter|legal|image`, `--plan`, `--photo` or
+`--scan` (instead of telling by each page), `--no-clean-up`, `--no-tables`, `--no-structure`, `--progress`
+(a line of JSON per page on standard error). [docs/interface.md](docs/interface.md) describes the answers,
+the kinds of error and the reading.
 
 Settings without a configuration file: `OPTDOC_OCR` (the engine `auto` stands for), `OPTDOC_TESSERACT`
 (the program's path), `OPTDOC_TESSERACT_LANGUAGES`. An application that embeds optdoc hands over its own
 with `optdoc.settings.set_settings`.
+
+## Standalone program
+
+`uv run python packaging/build.py` builds optdoc as one program with everything in it (Python, the OCR
+models and all), named the way Tauri wants a sidecar (`optdoc-aarch64-apple-darwin`), and tries it out:
+120 MB as one file, or a faster-starting folder with `--onedir`. See [docs/sidecar.md](docs/sidecar.md).
 
 ## Test bench
 
@@ -92,7 +107,8 @@ On those reports as clean 200-dpi scans RapidOCR reads 99.0 % of the numbers rig
 
 `<name>.reading.json` (format `optdoc-reading`, version 1) holds, per page, its size in points, where the text
 came from (`text` layer or `ocr`), the text, its Markdown, and every word with its offsets in the text, its box
-in page points and, for OCR, the engine's confidence. It also names the engine, the optdoc version and the plan.
+in points from the top left of the page as shown and, for OCR, the engine's confidence. It also names the
+engine, the optdoc version and the plan.
 
 ## In Python
 
@@ -107,6 +123,9 @@ try:
 finally:
     reading.close()
 ```
+
+Errors are `optdoc.errors.OptdocError` with a `kind` and `details`; `optdoc.errors.describe_error(error, "de")`
+words one in German, `"en"` in English.
 
 ## Planned
 

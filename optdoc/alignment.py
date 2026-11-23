@@ -275,7 +275,7 @@ def _page_text(
             page_text.baselines[i] = r.y1 - 0.2 * r.height
         z = lines[a]
         old = page_text.line_boxes.get(z)
-        page_text.line_boxes[z] = tuple(r) if old is None else (
+        page_text.line_boxes[z] = (r.x0, r.y0, r.x1, r.y1) if old is None else (
             min(old[0], r.x0), min(old[1], r.y0), max(old[2], r.x1), max(old[3], r.y1))
         page_text.word_spans.append((a, b))
         page_text.confidences.append(1.0)

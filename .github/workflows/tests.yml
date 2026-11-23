@@ -22,5 +22,25 @@ jobs:
       - run: uv sync --dev --extra ocr
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y tesseract-ocr tesseract-ocr-deu
-      - run: uv run ruff check optdoc tests bench
+      - run: uv run ruff check optdoc tests bench packaging
       - run: uv run pytest -v --timeout=600 --durations=15
+
+  sidecar:
+    name: standalone program (macOS arm64)
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+      - run: uv sync --extra ocr --group build
+      - run: uv run python packaging/build.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: optdoc-aarch64-apple-darwin
+          path: |
+            dist/optdoc-aarch64-apple-darwin
+            dist/optdoc-aarch64-apple-darwin.sha256
+            dist/optdoc-aarch64-apple-darwin.licences.json
+          retention-days: 14

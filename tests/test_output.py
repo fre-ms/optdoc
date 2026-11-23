@@ -1,11 +1,8 @@
-"""The results of a reading: searchable PDF, reading as JSON, Markdown, plan; the
-command line."""
+"""The results of a reading: searchable PDF, reading as JSON, Markdown, plan."""
 
 from __future__ import annotations
 
 import json
-import subprocess
-import sys
 from pathlib import Path
 
 import pymupdf
@@ -13,7 +10,7 @@ import pytest
 
 from optdoc import ocr as ocrlib
 from optdoc import output
-from optdoc.cli import main
+from optdoc.errors import OptdocError
 from optdoc.reading import read
 from tests.synthetic import scan
 
@@ -69,37 +66,7 @@ def test_text_layer_stays_as_it_is(tmp_path: Path, report: Path) -> None:
 def test_source_is_never_overwritten(tmp_path: Path, report: Path) -> None:
     reading = read(report)
     try:
-        with pytest.raises(ValueError, match="overwrite"):
+        with pytest.raises(OptdocError, match="overwrite"):
             output.write(reading, report.parent)
     finally:
         reading.close()
-
-
-def test_readers(capsys: pytest.CaptureFixture[str]) -> None:
-    assert main(["readers"]) == 0
-    answer = json.loads(capsys.readouterr().out)
-    assert set(answer) == {"version", "readers", "clean_up", "heic"}
-    assert set(answer["readers"]) <= {"rapidocr", "tesseract"}
-
-
-def test_prepare_reports_errors_without_content(tmp_path: Path,
-                                           capsys: pytest.CaptureFixture[str]) -> None:
-    assert main(["prepare", str(tmp_path / "fehlt.pdf")]) == 2
-    assert "no such file" in capsys.readouterr().err
-
-
-@needs_backend
-def test_prepare_on_the_command_line(tmp_path: Path, report: Path) -> None:
-    """``python -m optdoc prepare`` writes the results and answers in JSON; the plan it
-    wrote can be handed back."""
-    source = scan(report, tmp_path / "scan.pdf", rotation=2.0)
-    target = tmp_path / "ergebnis"
-    run = subprocess.run([sys.executable, "-m", "optdoc", "prepare", str(source), "--out",
-                           str(target)], capture_output=True, text=True, check=True)
-    answer = json.loads(run.stdout)
-    assert answer["pages"] == 2 and answer["ocr_pages"] == [1, 2]
-    assert answer["cleaned_up"] == [1, 2] and Path(answer["pdf"]).is_file()
-    second = subprocess.run([sys.executable, "-m", "optdoc", "prepare", str(source), "--out",
-                              str(tmp_path / "zwei"), "--plan", answer["plan"], "--no-structure"],
-                             capture_output=True, text=True, check=True)
-    assert json.loads(second.stdout)["cleaned_up"] == [1, 2]

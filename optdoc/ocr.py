@@ -11,10 +11,10 @@ word are approximated by dividing the word box evenly.
 from __future__ import annotations
 
 import csv
+import importlib.util
 import io
 import shutil
 import subprocess
-import tempfile
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,6 +22,8 @@ from typing import TYPE_CHECKING, Any, NamedTuple, Protocol
 
 import pymupdf
 
+from optdoc.errors import OCRError, OptdocError
+from optdoc.offline import no_telemetry
 from optdoc.pagetext import PageText
 from optdoc.settings import load_settings
 
@@ -56,10 +58,6 @@ class OCRBackend(Protocol):
         """Words of the rendered page; coordinates already divided by ``scale``."""
 
 
-class OCRError(Exception):
-    """An engine is missing, cannot be started, or failed on a page."""
-
-
 def _render(page: pymupdf.Page, dpi: int = OCR_DPI,
              max_pixel: int = MAX_PIXELS) -> tuple[pymupdf.Pixmap, float]:
     """Render the page for OCR; returns the pixmap and the pixels-per-point scale."""
@@ -73,7 +71,7 @@ def _render(page: pymupdf.Page, dpi: int = OCR_DPI,
 
 
 def _png(pix: pymupdf.Pixmap) -> bytes:
-    """The pixmap as PNG bytes, the form Tesseract reads from a file."""
+    """The pixmap as PNG bytes, the form Tesseract reads on its standard input."""
     return pix.tobytes("png")
 
 
@@ -180,7 +178,7 @@ class TesseractBackend:
         settings = load_settings()
         found = tesseract_program(program or settings.tesseract_path or None)
         if not found:
-            raise OCRError("Tesseract is not installed (no program 'tesseract').")
+            raise OCRError("no-reader", reader="tesseract")
         self.program = found
         wanted = language or settings.tesseract_languages
         installed = set(tesseract_languages(self.program))
@@ -205,21 +203,18 @@ class TesseractBackend:
 
     def _run(self, png: bytes, psm: str, scale: float,
               offset: tuple[float, float] = (0.0, 0.0)) -> list[OCRWord]:
-        """One Tesseract run on PNG bytes; ``offset`` (pixels) places a crop on the page."""
-        with tempfile.TemporaryDirectory() as folder:
-            image = Path(folder) / "seite.png"
-            image.write_bytes(png)
-            try:
-                run = subprocess.run(
-                    [self.program, str(image), "-", "-l", self.language, "--psm", psm, "tsv"],
-                    capture_output=True, text=True, encoding="utf-8", errors="replace",
-                    check=False, timeout=600,
-                )
-            except (OSError, subprocess.TimeoutExpired) as e:
-                raise OCRError(f"Tesseract could not be run: {e}") from e
+        """One Tesseract run on PNG bytes, handed over on standard input so that no image
+        of the page is ever written to a file; ``offset`` (pixels) places a crop on the
+        page.  Tesseract's own messages are not passed on: they may quote the page."""
+        try:
+            run = subprocess.run(
+                [self.program, "stdin", "-", "-l", self.language, "--psm", psm, "tsv"],
+                input=png, capture_output=True, check=False, timeout=600)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            raise OCRError("reader-failed", reader="tesseract") from e
         if run.returncode != 0:
-            raise OCRError(f"Tesseract reports an error: {run.stderr.strip()[:300]}")
-        return _words_from_tsv(run.stdout, scale, offset)
+            raise OCRError("reader-failed", reader="tesseract")
+        return _words_from_tsv(run.stdout.decode("utf-8", "replace"), scale, offset)
 
     def _reread_tables(self, pix: pymupdf.Pixmap, scale: float,
                             words: list[OCRWord]) -> list[OCRWord]:
@@ -306,10 +301,11 @@ class RapidOCRBackend:
 
     def __init__(self, language: str | None = "de") -> None:
         """Start the engine for ``language`` (a RapidOCR ``lang_type``), else the default."""
+        no_telemetry()  # before ONNX Runtime is loaded, or it is too late
         try:
             from rapidocr import RapidOCR
         except ImportError as e:
-            raise OCRError("RapidOCR is not installed (extra 'ocr').") from e
+            raise OCRError("no-reader", reader="rapidocr") from e
         self._RapidOCR = RapidOCR
         self._params = {"Global.log_level": "error"}
         language_model = self._language_model(language)
@@ -329,12 +325,9 @@ class RapidOCRBackend:
 
     @staticmethod
     def available() -> bool:
-        """True when the ``rapidocr`` package can be imported."""
-        try:
-            import rapidocr  # noqa: F401
-        except ImportError:
-            return False
-        return True
+        """True when the ``rapidocr`` package is installed; it is not loaded for that,
+        which takes a second or two."""
+        return importlib.util.find_spec("rapidocr") is not None
 
     def recognise(self, pix: pymupdf.Pixmap, scale: float) -> list[OCRWord]:
         """Words of the page: the engine's own word boxes where it gives them, else its
@@ -347,12 +340,19 @@ class RapidOCRBackend:
         model takes over for good."""
         try:
             return self._engine(image, return_word_box=True, use_cls=self.turn_lines)
+        except OptdocError:
+            raise  # the network guard, for one: its kind says more than "failed"
         except Exception as e:
             if self._default:
-                raise OCRError(f"RapidOCR failed: {e}") from e
+                raise OCRError("reader-failed", reader="rapidocr") from e
         self._engine = self._RapidOCR(params=self._params)
         self._default = True
-        return self._engine(image, return_word_box=True, use_cls=self.turn_lines)
+        try:
+            return self._engine(image, return_word_box=True, use_cls=self.turn_lines)
+        except OptdocError:
+            raise
+        except Exception as e:
+            raise OCRError("reader-failed", reader="rapidocr") from e
 
 
 def _words_from_result(result: Any, scale: float) -> list[OCRWord]:
@@ -446,7 +446,7 @@ def backend(name: str = "auto", languages: str | None = None,
         "auto": lambda: _first_available(languages, tables),
     }
     if name not in options:
-        raise OCRError(f"unknown OCR engine: {name!r} (auto, rapidocr, tesseract, none)")
+        raise OCRError("unknown-reader", name=name)
     return options[name]()
 
 
@@ -465,13 +465,13 @@ class _GapMeasure(NamedTuple):
     """How many gaps between neighbouring words the page has, and the usual (median)
     gap width in points."""
 
-    count: int
+    gaps: int
     usual: float
 
     def is_cell_boundary(self, space: float, line_height: float) -> bool:
         """A gap far wider than usual (table cells, columns); judged only once the
         page has enough gaps for the usual width to mean something."""
-        return self.count >= 4 and space > max(1.5 * line_height, 3.0 * self.usual)
+        return self.gaps >= 4 and space > max(1.5 * line_height, 3.0 * self.usual)
 
 
 def _same_line(w: OCRWord, ref: OCRWord) -> bool:
@@ -483,18 +483,22 @@ def _same_line(w: OCRWord, ref: OCRWord) -> bool:
 
 
 def _lines_from_words(words: Iterable[OCRWord]) -> list[list[OCRWord]]:
-    """Words grouped into lines by vertical overlap with each line's first word, the
-    lines top to bottom and the words of a line left to right; blank words dropped."""
+    """Words grouped into lines, left to right: a word joins the line whose last word
+    lies to its left and shares its height (:func:`_same_line`), the closest such line,
+    else it starts a line.  So a line follows a slight tilt word by word, where the band
+    of its first word loses the far end: a table row 450 pt wide, tilted by 1.2° (less
+    than optdoc straightens), drops by a whole line height.  The lines top to bottom,
+    the words of a line left to right; blank words dropped."""
     lines: list[list[OCRWord]] = []
-    for w in sorted((w for w in words if w.text), key=lambda w: (w.y0, w.x0)):
-        line = next((z for z in lines if _same_line(w, z[0])), None)
-        if line is None:
-            lines.append([w])
+    for w in sorted((w for w in words if w.text), key=lambda w: (w.x0, w.y0)):
+        slack = 0.5 * (w.y1 - w.y0)  # neighbouring boxes may overlap a little
+        candidates = [z for z in lines if z[-1].x1 <= w.x0 + slack and _same_line(w, z[-1])]
+        if candidates:
+            middle = (w.y0 + w.y1) / 2
+            min(candidates, key=lambda z: abs((z[-1].y0 + z[-1].y1) / 2 - middle)).append(w)
         else:
-            line.append(w)
-    lines.sort(key=lambda z: min(w.y0 for w in z))
-    for line in lines:
-        line.sort(key=lambda w: w.x0)
+            lines.append([w])
+    lines.sort(key=lambda z: (min(w.y0 for w in z), z[0].x0))
     return lines
 
 
@@ -598,7 +602,8 @@ def _unreadable_line(page_text: PageText, a: int, b: int) -> UnreadableLine:
     """The unreadable line covering the page text ``[a, b)``."""
     return UnreadableLine(
         page_number=page_text.number, start=a, end=b, text=page_text.text[a:b],
-        rects=[tuple(r) for r in page_text.rects(a, b)], font_size=page_text.font_size(a, b),
+        rects=[(r.x0, r.y0, r.x1, r.y1) for r in page_text.rects(a, b)],
+        font_size=page_text.font_size(a, b),
     )
 
 

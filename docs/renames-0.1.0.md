@@ -264,7 +264,6 @@ else changed in behaviour. This table is for code that used 0.0.1 (in practice: 
 |---|---|---|
 | `MAX_PIXEL` | `MAX_PIXELS` | constant |
 | `UNSICHER_KONFIDENZ` | `UNCERTAIN_CONFIDENCE` | constant |
-| `UNLESBAR` | `UNREADABLE` | constant |
 | `Kasten` | `Bounds` | constant |
 | `OCRWort` | `OCRWord` | class |
 | `OCRWort.text` | `OCRWord.text` | field |

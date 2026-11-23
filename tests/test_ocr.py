@@ -90,8 +90,9 @@ def test_text_layer_needs_no_ocr(report: Path) -> None:
 
 
 def test_unknown_backend() -> None:
-    with pytest.raises(ocrlib.OCRError):
+    with pytest.raises(ocrlib.OCRError) as caught:
         ocrlib.backend("zauber")
+    assert caught.value.kind == "unknown-reader"
 
 
 def test_open_heic(tmp_path: Path, report: Path) -> None:
@@ -362,5 +363,5 @@ def test_backend_choice_follows_the_settings(monkeypatch: pytest.MonkeyPatch) ->
     set_settings(Settings(ocr_backend="zauber"))
     assert ocrlib._preferred_backend("auto") == "auto"
     assert ocrlib._preferred_backend("tesseract") == "tesseract"
-    with pytest.raises(ocrlib.OCRError, match="unknown OCR engine: 'zauber'"):
+    with pytest.raises(ocrlib.OCRError, match="Unknown OCR engine: zauber"):
         ocrlib.backend("Zauber")

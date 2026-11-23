@@ -11,24 +11,23 @@ masks are available.
 
 from __future__ import annotations
 
+import importlib.util
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 import pymupdf
 
+from optdoc.errors import OptdocError
+
 Corner = tuple[float, float]
 Rectangle = tuple[float, float, float, float]
 
 
 def available() -> bool:
-    """True when OpenCV and NumPy can be imported (they come with the ``ocr`` extra)."""
-    try:
-        import cv2  # noqa: F401
-        import numpy  # noqa: F401
-    except ImportError:
-        return False
-    return True
+    """True when OpenCV and NumPy are installed (they come with the ``ocr`` extra); they
+    are not loaded for that."""
+    return all(importlib.util.find_spec(name) is not None for name in ("cv2", "numpy"))
 
 
 @dataclass
@@ -87,12 +86,47 @@ class CleanupPlan:
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> CleanupPlan:
-        """The plan from a :meth:`full_dict` dictionary; keys that are no field are ignored."""
+        """The plan from a :meth:`full_dict` dictionary; keys that are no field are ignored.
+        A value of the wrong kind or out of its range raises an
+        :class:`~optdoc.errors.OptdocError` of kind "bad-plan"."""
+        if not isinstance(d, dict):
+            raise OptdocError("bad-plan", reason="json")
         kept = {k: v for k, v in d.items() if k in cls.__dataclass_fields__}
+        if not all(_fits(k, v) for k, v in kept.items()):
+            raise OptdocError("bad-plan", reason="field")
         if kept.get("corners") is not None:
             kept["corners"] = [tuple(e) for e in kept["corners"]]
         kept["masks"] = [tuple(m) for m in kept.get("masks", [])]
         return cls(**kept)
+
+
+def _numbers(value: Any, count: int) -> bool:
+    """True for a list (or tuple) of ``count`` numbers."""
+    return (isinstance(value, list | tuple) and len(value) == count
+            and all(isinstance(v, int | float) and not isinstance(v, bool) for v in value))
+
+
+_RANGES: dict[str, tuple[Any, ...]] = {
+    "rotation": (0, 90, 180, 270), "upscale": (1, 2, 3, 4), "mask_colour": ("white", "black"),
+    **{k: (1, 2, 3, 4, 5) for k in ("denoise_strength", "contrast_strength", "sharpen_strength")},
+}
+
+
+def _fits(name: str, value: Any) -> bool:
+    """True when ``value`` is of the kind of the plan's field ``name`` and in its range."""
+    if name == "corners":
+        return value is None or (isinstance(value, list | tuple) and len(value) == 4
+                                 and all(_numbers(c, 2) for c in value))
+    if name == "masks":
+        return isinstance(value, list | tuple) and all(_numbers(m, 4) for m in value)
+    default = CleanupPlan.__dataclass_fields__[name].default
+    if isinstance(default, bool):
+        fits = isinstance(value, bool)
+    elif isinstance(default, int | float):
+        fits = isinstance(value, int | float) and not isinstance(value, bool)
+    else:
+        fits = isinstance(value, type(default))
+    return fits and value in _RANGES.get(name, (value,))
 
 
 # -- rendering -----------------------------------------------------------------------------------
@@ -220,6 +254,44 @@ def find_corners(image: Any, scale: float = 1.0) -> list[Corner] | None:
     return [(float(x), float(y)) for x, y in ordered]
 
 
+def _on_a_desk(grey: Any, quad: Any) -> bool:
+    """True when what lies around the quadrilateral (pixel corners of ``grey``) is
+    clearly darker than the paper just inside its edge: a desk, a table top, a hand.
+    Around a frame or a ruled table on a scan lies paper, printed or bare, as bright as
+    inside; unwarping to such a frame would cut the page or change its shape."""
+    import cv2
+    import numpy as np
+
+    h, w = grey.shape
+    inside = np.zeros((h, w), np.uint8)
+    cv2.fillConvexPoly(inside, quad.astype(np.int32), 255)
+    edge = max(3, int(0.02 * min(h, w)))
+    kernel = np.ones((2 * edge + 1, 2 * edge + 1), np.uint8)
+    band = cv2.subtract(inside, cv2.erode(inside, kernel))  # the margin just inside the edge
+    outside = cv2.dilate(inside, kernel) == 0
+    if outside.sum() < 0.01 * h * w or not band.any():
+        return False
+    paper = float(np.median(grey[band > 0]))
+    return float(np.median(grey[outside])) < paper - 30
+
+
+def sheet_in_photo(image: Any, scale: float = 1.0) -> list[Corner] | None:
+    """The corners of the sheet when ``image`` shows one lying on something darker than
+    paper, as :func:`find_corners` gives them; None for a page that fills the image, and
+    None when the quadrilateral has paper around it (a frame or a ruled table on a scan,
+    which :func:`find_corners` takes for a sheet).  This is what tells a photographed
+    page from a scanned one, also inside a PDF.  A sheet on a white desk counts as a
+    scan: it is not unwarped, which costs less than a page cut to a frame."""
+    corners = find_corners(image, scale)
+    if corners is None:
+        return None
+    import numpy as np
+
+    grey, f = _shrunk(_grey(image), 1000)
+    quad = np.array(corners, dtype=np.float64) * scale * f
+    return corners if _on_a_desk(grey, quad) else None
+
+
 def dark_borders(image: Any, width: float = 0.04, limit: int = 90) -> bool:
     """A dark frame around the page (scanner lid, photographed table edge), also when
     it runs at a slant: enough of the edge strip is dark."""
@@ -281,16 +353,20 @@ def native_dpi(page: pymupdf.Page) -> float | None:
     return best
 
 
-def suggest(image: Any, photo: bool = False, scale: float = 1.0,
+def suggest(image: Any, photo: bool | None = None, scale: float = 1.0,
               resolution: float | None = None) -> CleanupPlan:
     """Automatic suggestion for one page: straighten a visible tilt, unwarp a
     photographed sheet, upscale low-resolution images, even out an uneven background.
+    ``photo`` True takes the page for a photo (the sheet is looked for and unwarped),
+    False for a scan, None tells by the page itself (:func:`sheet_in_photo`).
     ``scale`` is pixels per point of ``image``, ``resolution`` the native dpi."""
     a = CleanupPlan()
-    if photo:
-        corners = find_corners(image, scale)
-        if corners is not None:
-            a.corners, a.unwarp = corners, True
+    if photo is None:
+        corners = sheet_in_photo(image, scale)
+    else:
+        corners = find_corners(image, scale) if photo else None
+    if corners is not None:
+        a.corners, a.unwarp = corners, True
     basis = apply_plan(image, CleanupPlan(unwarp=a.unwarp, corners=a.corners), scale) \
         if a.unwarp else image
     a.angle = estimate_tilt(basis)
@@ -299,7 +375,7 @@ def suggest(image: Any, photo: bool = False, scale: float = 1.0,
     a.straighten = abs(a.angle) >= 1.2
     a.upscale = 2 if resolution is not None and resolution < 150 else 1
     a.letter_mode = False  # measured: no gain over plain enlargement, so an explicit choice
-    a.background = photo or uneven_background(basis)
+    a.background = bool(photo) or a.unwarp or uneven_background(basis)
     a.borders = dark_borders(basis)
     a.remove_colour = colour_share(basis) > 0.003
     a.denoise = noise_share(basis) > 0.35
@@ -727,7 +803,7 @@ def as_png(image: Any) -> bytes:
 
     ok, buffer = cv2.imencode(".png", image)
     if not ok:
-        raise ValueError("PNG encoding failed")
+        raise OptdocError("clean-up-failed")
     return bytes(buffer)
 
 
