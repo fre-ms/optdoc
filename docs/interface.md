@@ -8,7 +8,7 @@ Every answer carries `interface`. It goes up when something a caller relies on c
 that breaks it: a field or a kind of error removed or renamed, a meaning changed. Within one
 interface, new fields, new options and new kinds of error may come; a caller ignores fields it
 does not know and treats an unknown kind of error like any other (its message says what
-happened). Releases are tagged (`v0.2.0`); pin a tag, not a branch.
+happened). Releases are tagged (`v0.2.1`); pin a tag, not a branch.
 
 ## Calling
 
@@ -30,27 +30,29 @@ Every answer has these two fields:
 | field | example | meaning |
 |---|---|---|
 | `interface` | `1` | the version of this description |
-| `made_with` | `"optdoc 0.2.0"` | the program and its version, for the record of what made a file |
+| `made_with` | `"optdoc 0.2.1"` | the program and its version, for the record of what made a file |
 
 ## `readers`: what this installation can do
 
 ```json
-{"interface": 1, "made_with": "optdoc 0.2.0", "version": "0.2.0",
- "readers": ["rapidocr", "tesseract"], "clean_up": true, "heic": true}
+{"interface": 1, "made_with": "optdoc 0.2.1", "version": "0.2.1",
+ "readers": ["rapidocr", "tesseract"], "clean_up": true, "heic": true, "tables": true}
 ```
 
 `readers` lists the OCR engines found, in order of preference (`rapidocr` comes inside the
 standalone program; `tesseract` is listed where the system has it). `clean_up` says whether the
-clean-up steps are there (OpenCV), `heic` whether HEIC and HEIF photos can be opened. The
-engines are not loaded for this, so the answer is quick (0.2 s for the standalone program as a
-folder, 2.6 s as one file, which unpacks itself first).
+clean-up steps are there (OpenCV), `heic` whether HEIC and HEIF photos can be opened, `tables`
+whether tables are found with their cells (Camelot, the extra "tables"; since 0.2.1). The engines
+are not loaded for this, so the answer is quick (0.2 s for the standalone program as a folder,
+3 s as one file, which unpacks itself first).
 
 ## `prepare`: make a document legible
 
 ```
 optdoc prepare <file> --out <folder> [--reader auto|rapidocr|tesseract|none]
     [--languages <packs>] [--paper a4|a5|a3|letter|legal|image] [--plan <plan.json>]
-    [--photo | --scan] [--no-clean-up] [--no-tables] [--no-structure] [--progress]
+    [--photo | --scan] [--no-clean-up] [--no-tables] [--no-structure] [--no-cells]
+    [--progress]
 ```
 
 `<file>` is a PDF or an image (JPEG, PNG, TIFF, BMP, GIF, WebP, PNM, HEIC, HEIF). optdoc never
@@ -70,16 +72,27 @@ file.
 The answer:
 
 ```json
-{"interface": 1, "made_with": "optdoc 0.2.0",
+{"interface": 1, "made_with": "optdoc 0.2.1",
  "pdf": "<folder>/<stem>.pdf", "reading": "<folder>/<stem>.reading.json",
  "markdown": "<folder>/<stem>.md", "plan": "<folder>/<stem>.plan.json",
  "pages": 2, "ocr_pages": [1, 2], "pages_without_text": [], "cleaned_up": [1, 2],
- "reader": "rapidocr"}
+ "reader": "rapidocr", "tables": 1}
 ```
 
 Pages are counted from 1. `ocr_pages` were read by OCR (the others had a text layer of their own),
 `pages_without_text` hold no text at all afterwards (no layer, no engine, or nothing legible),
-`cleaned_up` were changed by the clean-up, `reader` is the engine used (`null` without one).
+`cleaned_up` were changed by the clean-up, `reader` is the engine used (`null` without one),
+`tables` the number of tables found with their cells (`null` when they were not looked for:
+`--no-cells`, or the extra "tables" is not installed, or Camelot failed; since 0.2.1).
+
+**Tables.** The tables of every page, with their cells, go into the reading (below); a laboratory
+result then is a row of cells (name, value, unit, range, flag) rather than a line to take apart.
+optdoc finds them with Camelot in the PDF it has just written, on scanned and photographed pages
+in its own text layer. Measured on invented laboratory reports in three layouts: of 216 results
+in born-digital PDFs every row came out cut into the right cells and read exactly; of 216 in
+photos, 211 cut right and 193 read exactly (the rest are misreadings such as "U/I" for "U/l").
+`--no-cells` leaves them out (about 4 s less for the standalone program as one file, 0.6 s as a
+folder).
 
 **Photos and scans.** A page without text is cleaned up by the plan given, else by optdoc's
 suggestion. The suggestion tells a photographed page from a scanned one by the page itself, in an
@@ -109,7 +122,7 @@ wants the system to make sure may run optdoc under
 ## Failures
 
 ```json
-{"interface": 1, "made_with": "optdoc 0.2.0", "error": "unsupported",
+{"interface": 1, "made_with": "optdoc 0.2.1", "error": "unsupported",
  "details": {"suffix": ".docx"},
  "message": {"en": "optdoc cannot open files of type .docx.",
              "de": "Dateien vom Typ .docx kann optdoc nicht öffnen."}}
@@ -143,31 +156,43 @@ The same kinds and wording are there for programs that use optdoc as a Python li
 ## The reading: `optdoc-reading`, version 1
 
 ```json
-{"format": "optdoc-reading", "version": 1, "made_with": "optdoc 0.2.0",
+{"format": "optdoc-reading", "version": 1, "made_with": "optdoc 0.2.1",
  "reader": "rapidocr", "source": "<file name>", "plan": {"1": {"…": "…"}},
  "pages": [{"page": 1, "width": 595.28, "height": 841.89, "source": "ocr",
-            "text": "Kalium 5,8 mmol/l 3,5 - 5,1 H\n…", "markdown": "…",
+            "text": "Kalium\t5,8\tmmol/l\t3,5 - 5,1\tH\n…", "markdown": "…",
             "words": [{"text": "Kalium", "start": 0, "end": 6,
-                       "box": [56.2, 210.4, 89.9, 221.0], "confidence": 0.998}]}]}
+                       "box": [56.2, 210.4, 89.9, 221.0], "confidence": 0.998}],
+            "tables": [{"box": [56.2, 150.1, 536.0, 451.3], "confidence": 0.863,
+                        "rows": [[{"text": "Kalium", "box": [56.2, 208.4, 226.2, 224.4]},
+                                  {"text": "5,8", "box": [226.2, 208.4, 296.2, 224.4]},
+                                  "…"]]}]}]}
 ```
 
 Per page: its size in points, where its text came from (`text` layer or `ocr`), the text, its
 Markdown, and every word with its offsets in the text and its `box` as **[left, top, right,
 bottom] in points from the top left of the page as shown**, the same page as in the PDF. OCR words
-carry the engine's `confidence` (0 to 1). In the text, a line of the page is a line; a gap far
-wider than a space (a table cell) is a tab. `plan` is the content of `<stem>.plan.json`.
+carry the engine's `confidence` (0 to 1). In the text, a line of the page is a line; on a page
+read by OCR, a gap wider than the words are high (between the cells of a table, or columns) is a
+tab. `plan` is the content of `<stem>.plan.json`.
+
+`tables` (since 0.2.1) lists the tables of the page, top to bottom, each with its `box`, Camelot's
+`confidence` in it (0 to 1) and its `rows`, top to bottom, each a list of cells from left to
+right: `text` (spaces collapsed; empty for an empty cell or one another cell spans) and `box`, in
+the same points as the words. Every row is given once, even where Camelot found a table twice.
+`tables` is `[]` when the page has none and `null` when tables were not looked for.
 
 ## The text layer
 
 On every page read by OCR, the PDF carries the words invisibly where they are printed, one OCR
-line as one line of text: the words of a row of a table stand in one line, with real spaces
-between them, in the order of the row. So a program that takes the text out finds name, value,
-unit, range and flag of a laboratory result in one line: measured with PDFKit's
-`PDFPage.string` (as medorello reads) and MuPDF on photographed invented laboratory reports in
-three layouts, every row of every table; Poppler's `pdftotext` keeps rows with `-layout`
-(without it, it orders a table by columns, a born-digital one as well). Each word is scaled to
-its printed width, so a search or a selection covers it. Every character is written as it was
-read, "≤", "↑" and "µ" included. The tests check rows with PDFKit (on macOS) and MuPDF.
+line as one line of text, with real spaces between the words. Within a cell of a table the space
+is stretched over the gap; between two cells (a tab in the reading) the gap stays open, so that a
+program finding tables by the gaps between text (Camelot, Tabula) sees the columns. PDFKit's
+`PDFPage.string` (as medorello reads) gives every row of a table as one line, name, value, unit,
+range and flag in order: measured on photographed invented laboratory reports in three layouts,
+every row of every table. MuPDF gives running text as a line and a table row cell by cell, as it
+does for a born-digital table; Poppler's `pdftotext` keeps rows with `-layout`. Each word is
+scaled to its printed width, so a search or a selection covers it. Every character is written as
+it was read, "≤", "↑" and "µ" included. The tests check this with PDFKit (on macOS) and MuPDF.
 
 ## Licence
 

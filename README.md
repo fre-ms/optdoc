@@ -33,6 +33,10 @@ as a standalone program ([docs/sidecar.md](docs/sidecar.md)). `CHANGELOG.md` lis
   ruled grids, which Tesseract's page segmentation tends to drop, are read a second time without their lines.
 - **Structures** the OCR text as Markdown: paragraphs re-joined, headings by size and weight, lists,
   tables from wide gaps.
+- **Finds tables with their cells** (extra `tables`, Camelot), in born-digital PDFs and, through its own
+  text layer, in scans and photos: a laboratory result comes out as a row of cells, name, value, unit,
+  range, flag. On invented laboratory reports in three layouts every one of 216 rows in born-digital PDFs
+  was cut and read right, and 211 of 216 in photos were cut right (193 read exactly).
 - **Writes** a searchable PDF (the cleaned-up pages with the recognised words laid invisibly over the printed
   ones, line by line, so that selecting a word in a reader covers it and a program that takes the text out
   gets a row of a table as one line; every character as read, "≤" and "↑" too), the reading as JSON, the
@@ -49,10 +53,12 @@ Python 3.12 or later, with [uv](https://docs.astral.sh/uv/):
 ```
 git clone https://github.com/fre-ms/optdoc
 cd optdoc
-uv sync --extra ocr
+uv sync --extra ocr --extra tables
 ```
 
-The `ocr` extra brings RapidOCR, ONNX Runtime, OpenCV and NumPy (for the clean-up steps) and HEIC support.
+The `ocr` extra brings RapidOCR, ONNX Runtime, OpenCV and NumPy (for the clean-up steps) and HEIC support;
+the `tables` extra brings [Camelot](https://github.com/camelot-dev/camelot), which finds tables with their
+cells.
 Tesseract is optional and installed separately (`brew install tesseract tesseract-lang`,
 `apt install tesseract-ocr tesseract-ocr-deu`).
 
@@ -69,8 +75,8 @@ given and nowhere else. Every command answers with one JSON object on standard o
 any language can use optdoc as a helper; a failure too, with a fixed kind and its message in English and
 German, and exit status 2. No answer quotes a document or its path. Options: `--reader
 auto|rapidocr|tesseract|none`, `--languages`, `--paper a4|a5|a3|letter|legal|image`, `--plan`, `--photo` or
-`--scan` (instead of telling by each page), `--no-clean-up`, `--no-tables`, `--no-structure`, `--progress`
-(a line of JSON per page on standard error). [docs/interface.md](docs/interface.md) describes the answers,
+`--scan` (instead of telling by each page), `--no-clean-up`, `--no-tables`, `--no-structure`, `--no-cells`
+(no tables with their cells), `--progress` (a line of JSON per page on standard error). [docs/interface.md](docs/interface.md) describes the answers,
 the kinds of error and the reading.
 
 Settings without a configuration file: `OPTDOC_OCR` (the engine `auto` stands for), `OPTDOC_TESSERACT`
@@ -80,8 +86,8 @@ with `optdoc.settings.set_settings`.
 ## Standalone program
 
 `uv run python packaging/build.py` builds optdoc as one program with everything in it (Python, the OCR
-models and all), named the way Tauri wants a sidecar (`optdoc-aarch64-apple-darwin`), and tries it out:
-120 MB as one file, or a faster-starting folder with `--onedir`. See [docs/sidecar.md](docs/sidecar.md).
+models, Camelot and all), named the way Tauri wants a sidecar (`optdoc-aarch64-apple-darwin`), and tries it
+out: 142 MB as one file, or a faster-starting folder with `--onedir`. See [docs/sidecar.md](docs/sidecar.md).
 
 ## Test bench
 
@@ -103,12 +109,15 @@ optdoc bench reports/
 On those reports as clean 200-dpi scans RapidOCR reads 99.0 % of the numbers right (Tesseract 95.1 %); tilted by
 2°, noisy and at 150 dpi 96.1 % (Tesseract 63.8 %). That is why every number is to be read twice (see *Planned*).
 
+Where a document also has `<name>.cells.json` (the cells of each row as printed; `bench/lab_reports.py`
+writes it), the bench scores its tables as well: rows cut into the right cells, rows read exactly.
+
 ## The reading
 
 `<name>.reading.json` (format `optdoc-reading`, version 1) holds, per page, its size in points, where the text
 came from (`text` layer or `ocr`), the text, its Markdown, and every word with its offsets in the text, its box
-in points from the top left of the page as shown and, for OCR, the engine's confidence. It also names the
-engine, the optdoc version and the plan.
+in points from the top left of the page as shown and, for OCR, the engine's confidence, and the page's
+tables with their cells. It also names the engine, the optdoc version and the plan.
 
 ## In Python
 

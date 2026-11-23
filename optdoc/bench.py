@@ -19,12 +19,24 @@ Per document and in total:
 - ``rows_all_numbers_right``: truth lines whose every number was read right;
 - ``similarity``: mean similarity of a truth line to its best reading line (0 to 1);
 - ``confidence``: the engine's mean word confidence on OCR pages.
+
+Where a document also has ``<stem>.cells.json`` (a list of rows, each the list of its
+non-empty cells as printed) and the extra "tables" is installed, its tables are scored
+as well (:mod:`optdoc.tables`; the searchable PDF is written into a hidden folder inside
+the bench folder for that, and removed, so that nothing of a document leaves it):
+
+- ``table_rows``: rows in the cells file; ``table_rows_cut_right``: rows that come out
+  as a table row with the same cells, one for one (each read with at most one character
+  in five otherwise, spaces aside: an OCR misreading is no wrong cut);
+  ``table_rows_exact``: rows whose every cell is read exactly as printed (spaces aside).
 """
 
 from __future__ import annotations
 
 import difflib
+import json
 import re
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -35,6 +47,7 @@ from optdoc.loading import HEIC_SUFFIXES, IMAGE_SUFFIXES
 from optdoc.pagetext import PageText
 
 TRUTH_SUFFIX = ".truth.txt"
+CELLS_SUFFIX = ".cells.json"
 DOCUMENT_SUFFIXES = IMAGE_SUFFIXES | HEIC_SUFFIXES | {".pdf"}
 _NUMBER = re.compile(r"[<>≤≥]?\d+(?:[.,]\d+)?")
 
@@ -73,6 +86,9 @@ class Score:
     similarity_sum: float = 0.0
     confidence_sum: float = 0.0
     confidence_words: int = 0
+    table_rows: int = 0
+    table_rows_cut_right: int = 0
+    table_rows_exact: int = 0
 
     def add(self, other: Score) -> None:
         """Add the figures of another score."""
@@ -94,6 +110,10 @@ class Score:
             "similarity": round(self.similarity_sum / self.lines, 4) if self.lines else None,
             "confidence": (round(self.confidence_sum / self.confidence_words, 4)
                            if self.confidence_words else None),
+            "table_rows": self.table_rows, "table_rows_cut_right": self.table_rows_cut_right,
+            "table_rows_cut_right_share": share(self.table_rows_cut_right, self.table_rows),
+            "table_rows_exact": self.table_rows_exact,
+            "table_rows_exact_share": share(self.table_rows_exact, self.table_rows),
         }
 
 
@@ -117,6 +137,43 @@ def score_text(truth: list[str], reading_lines: list[str]) -> Score:
         score.numbers_right += right
         score.rows_all_numbers_right += right == len(expected)
         score.similarity_sum += best_ratio
+    return score
+
+
+def _bare(text: str) -> str:
+    """A cell's text without any spacing."""
+    return "".join(str(text).split())
+
+
+def _distance(a: str, b: str) -> int:
+    """How many characters to insert, drop or change to make ``a`` into ``b``."""
+    before = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        now = [i]
+        for j, cb in enumerate(b, 1):
+            now.append(min(before[j] + 1, now[j - 1] + 1, before[j - 1] + (ca != cb)))
+        before = now
+    return before[-1]
+
+
+def _same_cell(found: str, printed: str) -> bool:
+    """True when the cell found is the printed one, read with at most one character in
+    five otherwise ("U/I" for "U/l" is a misreading, not a wrong cut)."""
+    return _distance(found, printed) <= max(1, len(printed) // 5)
+
+
+def score_tables(truth: list[list[str]], tables: list[list[list[str]]]) -> Score:
+    """Compare the rows of a cells file with the rows of the tables found (each a list of
+    rows of cell texts)."""
+    rows = [[_bare(c) for c in row if _bare(c)] for table in tables for row in table]
+    score = Score()
+    for want in truth:
+        cells = [_bare(c) for c in want]
+        same = [r for r in rows if len(r) == len(cells)]
+        score.table_rows += 1
+        score.table_rows_cut_right += any(
+            all(_same_cell(a, b) for a, b in zip(r, cells, strict=True)) for r in same)
+        score.table_rows_exact += cells in same
     return score
 
 
@@ -160,8 +217,22 @@ def rows_of(page_text: PageText) -> list[str]:
     return [" ".join(t for _, t in sorted(row, key=lambda w: w[0].x0)) for row, _ in rows]
 
 
-def _read_lines(path: Path, reader: str, clean_up: bool) -> tuple[list[str], Score, dict[str, Any]]:
-    """The reading lines of a document, its confidence figures and a summary."""
+def _cell_texts(path: Path, reading: Any) -> list[list[list[str]]]:
+    """The tables of a reading as rows of cell texts; the searchable PDF they are found in
+    is written into a hidden folder inside the document's own folder and removed."""
+    from optdoc import output
+
+    with tempfile.TemporaryDirectory(prefix=".optdoc-bench-", dir=path.parent) as work:
+        output.write(reading, work, stem="document")
+    found = reading.tables or {}
+    return [[[c.text for c in row] for row in t.rows] for page in found.values() for t in page]
+
+
+def _read_lines(path: Path, reader: str, clean_up: bool, cells: Path | None = None,
+                ) -> tuple[list[str], Score, dict[str, Any]]:
+    """The reading lines of a document, its confidence figures and a summary, and its
+    table figures when ``cells`` names a cells file."""
+    from optdoc import tables
     from optdoc.reading import read
 
     reading = read(path, reader=reader, clean_up=clean_up)
@@ -175,6 +246,12 @@ def _read_lines(path: Path, reader: str, clean_up: bool) -> tuple[list[str], Sco
                 confidence.confidence_words += len(page.text.confidences)
         summary = {"pages": len(reading.pages), "ocr_pages": sum(p.ocr for p in reading.pages),
                    "cleaned_up": len(reading.plan)}
+        if cells is not None and tables.available():
+            truth = json.loads(cells.read_text(encoding="utf-8"))
+            found = score_tables(truth, _cell_texts(path, reading))
+            confidence.table_rows = found.table_rows
+            confidence.table_rows_cut_right = found.table_rows_cut_right
+            confidence.table_rows_exact = found.table_rows_exact
         return lines, confidence, summary
     finally:
         reading.close()
@@ -204,8 +281,10 @@ def bench(folder: str | Path, readers: list[str] | None = None, clean_up: bool =
         for reader in readers:
             entry: dict[str, Any] = {"document": number, "suffix": path.suffix.lower(),
                                      "reader": reader}
+            cells = path.with_name(path.stem + CELLS_SUFFIX)
             try:
-                lines, confidence, summary = _read_lines(path, reader, clean_up)
+                lines, confidence, summary = _read_lines(
+                    path, reader, clean_up, cells if cells.is_file() else None)
             except Exception as error:  # the message may quote a path; only its kind leaves
                 entry["error"] = (error.kind if isinstance(error, OptdocError)
                                   else type(error).__name__)
@@ -214,6 +293,8 @@ def bench(folder: str | Path, readers: list[str] | None = None, clean_up: bool =
             score = score_text(truth, lines)
             score.confidence_sum, score.confidence_words = (confidence.confidence_sum,
                                                             confidence.confidence_words)
+            for name in ("table_rows", "table_rows_cut_right", "table_rows_exact"):
+                setattr(score, name, getattr(confidence, name))
             result.totals[reader].add(score)
             result.documents.append({**entry, **summary, **score.as_dict()})
     return result

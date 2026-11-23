@@ -27,6 +27,7 @@ from optdoc.errors import OptdocError
 from optdoc.loading import open_document
 from optdoc.pagetext import PageText, read_text_layer
 from optdoc.structure import Structure, analyse_page_structure
+from optdoc.tables import Table
 
 SUGGESTION_DPI = 150  # resolution the clean-up suggestion looks at a page with
 MAX_PIXELS_UPSCALED = 9000  # cap for the OCR image of an upscaled page
@@ -76,13 +77,16 @@ class PageReading:
 @dataclass
 class Reading:
     """A read document: the cleaned-up document, the plan that was applied, the pages,
-    and the OCR engine used (None without one).  Call :meth:`close` when done."""
+    the OCR engine used (None without one), and the tables of its pages by page number
+    once :func:`optdoc.output.write` has looked for them (None until then, or when it
+    did not).  Call :meth:`close` when done."""
 
     source: Path
     doc: pymupdf.Document
     plan: dict[int, cleanup.CleanupPlan]
     pages: list[PageReading] = field(default_factory=list)
     reader: str | None = None
+    tables: dict[int, list[Table]] | None = None
 
     @property
     def without_text(self) -> list[int]:

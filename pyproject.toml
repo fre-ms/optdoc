@@ -26,6 +26,9 @@ dependencies = [
 [project.optional-dependencies]
 # RapidOCR brings OpenCV and NumPy, which the clean-up steps need as well
 ocr = ["rapidocr>=3", "onnxruntime>=1.18", "pillow>=10", "pillow-heif>=0.18"]
+tables = [
+    "camelot-py>=2.2",
+]
 
 [project.scripts]
 optdoc = "optdoc.cli:main"

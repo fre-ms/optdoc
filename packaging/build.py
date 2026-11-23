@@ -1,6 +1,6 @@
 """Build optdoc as one executable file and try it out.
 
-    uv sync --extra ocr --group build
+    uv sync --extra ocr --extra tables --group build
     uv run python packaging/build.py [--identity "Developer ID Application: …"] [--no-check]
 
 writes ``dist/optdoc-<target>`` (the name Tauri expects of a sidecar, ``<target>`` being
@@ -51,8 +51,9 @@ def target_triple() -> str:
 
 
 def build(name: str, identity: str | None, onedir: bool = False) -> Path:
-    """Run PyInstaller on the specification; returns the program."""
-    env = {**os.environ, "OPTDOC_BINARY_NAME": name}
+    """Run PyInstaller on the specification; returns the program.  PyInstaller loads ONNX
+    Runtime to collect it, which would start its telemetry (see optdoc.offline)."""
+    env = {**os.environ, "OPTDOC_BINARY_NAME": name, "ORT_DISABLE_TELEMETRY": "1"}
     if identity:
         env["OPTDOC_CODESIGN_IDENTITY"] = identity
     if onedir:
@@ -67,14 +68,15 @@ def build(name: str, identity: str | None, onedir: bool = False) -> Path:
 
 
 def licences() -> list[dict[str, str]]:
-    """The Python distributions the program carries (optdoc with the extra "ocr" and what
-    they need), each with its version and licence as its metadata states it."""
+    """The Python distributions the program carries (optdoc with the extras "ocr" and
+    "tables" and what they need), each with its version and licence as its metadata states
+    it."""
     from importlib import metadata
 
     from packaging.requirements import Requirement
 
     found: dict[str, dict[str, str]] = {}
-    queue = [("optdoc", {"ocr"})]
+    queue = [("optdoc", {"ocr", "tables"})]
     while queue:
         name, extras = queue.pop()
         key = name.lower().replace("_", "-")
@@ -114,7 +116,8 @@ def check(program: Path) -> dict[str, object]:
     checks: dict[str, str] = {}
     status, answer, _, timings["readers"] = _run([str(program), "readers"])
     assert status == 0 and "rapidocr" in answer["readers"], answer
-    assert answer["clean_up"] and answer["heic"] and answer["interface"] >= 1, answer
+    assert answer["clean_up"] and answer["heic"] and answer["tables"], answer
+    assert answer["interface"] >= 1, answer
     checks["readers"] = f"{answer['made_with']}, readers {answer['readers']}"
     with tempfile.TemporaryDirectory() as folder:
         work = Path(folder)
@@ -131,12 +134,14 @@ def check(program: Path) -> dict[str, object]:
             env)
         assert status == 0 and answer["ocr_pages"] == [1] and answer["cleaned_up"] == [1], \
             answer
+        assert answer["tables"] and answer["tables"] >= 1, answer
         assert [json.loads(z) for z in err.splitlines()] == [{"page": 1, "of": 1}], err
         assert sorted(p.name for p in (work / "out").iterdir()) == [
             "foto.md", "foto.pdf", "foto.plan.json", "foto.reading.json"]
         left = [str(p.relative_to(work)) for f in empty.values() for p in f.rglob("*")]
         assert not left, left
-        checks["prepare"] = "photo read, four files, nothing left in tmp, home or cache"
+        checks["prepare"] = ("photo read, its table found, four files, nothing left in tmp, "
+                             "home or cache")
         status, answer, _, _ = _run([str(program), "prepare", str(work / "fehlt.jpg")])
         assert status == 2 and answer["error"] == "missing", answer
         checks["failure"] = "answers with its kind"
@@ -178,7 +183,8 @@ def main() -> int:
         "python": licences(),
         "note": "Native libraries inside these packages carry their own licences: OpenCV "
                 "brings FFmpeg (LGPL), pillow-heif brings libheif and libde265 (LGPL) and x265 "
-                "(GPL 2.0 or later); see each package's licence files.",
+                "(GPL 2.0 or later), pypdfium2 brings pdfium (Apache 2.0 and BSD); see each "
+                "package's licence files.",
     }, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
     files = [p for p in program.parent.rglob("*") if p.is_file()] if args.onedir else [program]
     summary: dict[str, object] = {

@@ -4,7 +4,8 @@ real reports arrive, and let ``optdoc bench`` measure the readings.
     uv run python bench/lab_reports.py <folder> [count] [seed]
 
 writes ``lab-01.pdf`` … and next to each ``lab-01.truth.txt`` (one line per result, as
-printed).  Save the photo of ``lab-01.pdf`` as ``lab-01.jpg`` (or .heic, .png) in the same
+printed) and ``lab-01.cells.json`` (the cells of each result's row, as printed, for the
+table figures).  Save the photo of ``lab-01.pdf`` as ``lab-01.jpg`` (or .heic, .png) in the same
 folder; the bench pairs a photo with the truth file of the same name.  Everything here is
 made up: the laboratory, the patient, the values.
 
@@ -15,6 +16,7 @@ a comparator (< 0,5), some are flagged H or L against their range.
 
 from __future__ import annotations
 
+import json
 import random
 import sys
 from pathlib import Path
@@ -159,11 +161,15 @@ def make(folder: Path, count: int = 6, seed: int = 1) -> list[Path]:
         doc.save(pdf)
         doc.close()
         truth = [f"# {stem}: invented laboratory report, layout {layout + 1}"]
+        cells = []
         for name, value, unit, ref, flag in rows:
             order = ((name, flag, value, unit, ref) if layout == 2
                      else (name, value, unit, ref, flag))
             truth.append(" ".join(t for t in order if t))
+            cells.append([t for t in order if t])
         (folder / f"{stem}.truth.txt").write_text("\n".join(truth) + "\n", encoding="utf-8")
+        (folder / f"{stem}.cells.json").write_text(json.dumps(cells, ensure_ascii=False, indent=1)
+                                                   + "\n", encoding="utf-8")
         made.append(pdf)
     return made
 

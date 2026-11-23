@@ -320,20 +320,17 @@ def test_better_reading_replaces_only_with_more_confidence() -> None:
 
 
 def test_wide_gaps_become_tabs() -> None:
-    """A gap far wider than the usual one becomes a tab, but only once the page has at
-    least four gaps to tell what usual means."""
+    """A gap wider than the word is high becomes a tab, on any page, however few gaps it
+    has; a gap narrower than that stays a space."""
     def line(y: float, texts: list[str], xs: list[float]) -> list[OCRWord]:
         return [OCRWord(t, x, y, x + 6 * len(t), y + 10, 0.9)
                 for t, x in zip(texts, xs, strict=True)]
 
-    words = (line(100, ["Medikament", "Dosis"], [50, 300])
-               + line(120, ["a", "b", "c"], [50, 60, 70])
-               + line(140, ["d", "e", "f"], [50, 60, 70]))
+    words = line(100, ["Medikament", "Dosis"], [50, 300]) + line(120, ["a", "b", "c"],
+                                                                 [50, 62, 80])
     s = page_text_from_words(words, 0, 595, 842)
-    assert s.text.splitlines()[0] == "Medikament\tDosis"
-    assert s.word_spans[:2] == [(0, 10), (11, 16)] and len(s.confidences) == 8
-    few = line(100, ["Medikament", "Dosis"], [50, 300]) + line(120, ["a", "b"], [50, 60])
-    assert "\t" not in page_text_from_words(few, 0, 595, 842).text
+    assert s.text.splitlines() == ["Medikament\tDosis", "a b\tc"]
+    assert s.word_spans[:2] == [(0, 10), (11, 16)] and len(s.confidences) == 5
 
 
 def test_line_unreadable_rules() -> None:

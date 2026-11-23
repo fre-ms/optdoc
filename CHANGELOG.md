@@ -2,6 +2,32 @@
 
 ## 0.2.1 (2026-11-23)
 
+### Added
+
+- **Tables with their cells** (`optdoc.tables`, extra `tables`): optdoc finds the tables of every page
+  with Camelot (hybrid) in the PDF it has just written, on scanned and photographed pages in its own
+  text layer, and puts them into the reading: per page `tables`, each with its box, Camelot's confidence
+  and its rows of cells (text and box). A table Camelot finds twice gives every row once. On invented
+  laboratory reports in three layouts: 216 of 216 rows in born-digital PDFs cut and read right; 211 of
+  216 in photos cut right, 193 read exactly. Compared were Camelot, img2table, pdfplumber, RapidTable,
+  Tabula and PyMuPDF; Tabula would need Java and read photos worse.
+- `prepare --no-cells`; the answer of `prepare` counts the tables, `readers` says whether they can be
+  found (`tables`).
+- `optdoc bench` scores tables where a document has `<name>.cells.json`; `bench/lab_reports.py` writes
+  one per report.
+
+### Changed
+
+- The text layer leaves the gap between two cells of a table open (an ordinary space, then the next
+  word where it is printed) and stretches the space only within a cell. Programs that find tables by
+  the gaps between text see the columns: Camelot cut 49 of 54 photographed rows right, none before.
+  PDFKit still reads every row as one line.
+- A gap between OCR words wider than the words are high is a cell boundary (a tab in the text). The
+  former rule, far wider than the page's usual gap, found none in two of three laboratory layouts;
+  their Markdown now has tables.
+- The build of the standalone program switches off ONNX Runtime's telemetry for PyInstaller as well,
+  which loads the library to collect it.
+
 ### Fixed
 
 - Standard error holds optdoc's own lines only, as the interface says: on Linux, ONNX Runtime wrote a

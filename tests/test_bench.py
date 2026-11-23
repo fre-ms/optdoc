@@ -12,6 +12,7 @@ import pymupdf
 import pytest
 
 from optdoc import ocr as ocrlib
+from optdoc import tables
 from optdoc.bench import bench, numbers_of, score_text, truth_lines
 from optdoc.cli import main
 from tests.synthetic import rasterise
@@ -37,10 +38,14 @@ def test_reports_and_truth(tmp_path: Path) -> None:
     assert [p.name for p in pdfs] == ["lab-01.pdf", "lab-02.pdf", "lab-03.pdf"]
     lines = truth_lines(tmp_path / "lab-01.truth.txt")
     assert len(lines) == 18 and all(not z.startswith("#") for z in lines)
+    assert len(json.loads((tmp_path / "lab-01.cells.json").read_text(encoding="utf-8"))) == 18
     result = bench(tmp_path, readers=ocrlib.available_backends() or ["none"]).as_dict()
-    # a text layer is read as it is: every number of every row right
+    # a text layer is read as it is: every number of every row right, every row of the
+    # table cut and read right
     for entry in result["documents"]:
         assert entry["numbers_right_share"] == 1.0, entry
+        if tables.available():
+            assert entry["table_rows_exact"] == entry["table_rows"] == 18, entry
 
 
 @pytest.mark.skipif(not ocrlib.available_backends(), reason="kein OCR-Backend installiert")

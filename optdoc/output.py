@@ -18,10 +18,11 @@ from typing import Any
 
 import pymupdf
 
-from optdoc import __version__, textlayer
+from optdoc import __version__, tables, textlayer
 from optdoc.errors import OptdocError
 from optdoc.pagetext import PageText
 from optdoc.reading import PageReading, Reading
+from optdoc.tables import Table
 
 FORMAT = "optdoc-reading"
 FORMAT_VERSION = 1
@@ -56,8 +57,8 @@ def _words(page_text: PageText) -> list[dict[str, Any]]:
     return words
 
 
-def _page_as_dict(s: PageReading) -> dict[str, Any]:
-    """One page of the reading."""
+def _page_as_dict(s: PageReading, tables: list[Table] | None) -> dict[str, Any]:
+    """One page of the reading; ``tables`` None when they were not looked for."""
     return {
         "page": s.number + 1,
         "width": round(s.text.width, 2),
@@ -66,6 +67,7 @@ def _page_as_dict(s: PageReading) -> dict[str, Any]:
         "text": s.text.text,
         "markdown": s.markdown,
         "words": _words(s.text),
+        "tables": [t.as_dict() for t in tables] if tables is not None else None,
     }
 
 
@@ -83,7 +85,9 @@ def reading_as_dict(reading: Reading) -> dict[str, Any]:
         "reader": reading.reader,
         "source": reading.source.name,
         "plan": plan_as_dict(reading),
-        "pages": [_page_as_dict(s) for s in reading.pages],
+        "pages": [_page_as_dict(s, None if reading.tables is None
+                                else reading.tables.get(s.number, []))
+                  for s in reading.pages],
     }
 
 
@@ -109,12 +113,15 @@ def searchable_pdf(reading: Reading) -> bytes:
         duplicate.close()
 
 
-def write(reading: Reading, folder: str | Path, stem: str | None = None) -> dict[str, Path]:
+def write(reading: Reading, folder: str | Path, stem: str | None = None,
+          cells: bool = True) -> dict[str, Path]:
     """Write ``<stem>.pdf``, ``<stem>.reading.json``, ``<stem>.md`` and
     ``<stem>.plan.json`` into ``folder`` (created when missing); returns the paths.
-    Nothing is written anywhere else.  Raises :class:`~optdoc.errors.OptdocError`:
-    "same-as-source" when the PDF would replace the document that was read,
-    "unwritable" when the folder cannot take the files."""
+    With ``cells`` (and the extra "tables") the tables of the PDF written are looked
+    for and go into the reading with their cells (:mod:`optdoc.tables`); a failure
+    there leaves them out.  Nothing is written anywhere else.  Raises
+    :class:`~optdoc.errors.OptdocError`: "same-as-source" when the PDF would replace the
+    document that was read, "unwritable" when the folder cannot take the files."""
     target = Path(folder)
     stem = stem or reading.source.stem
     paths = {
@@ -125,17 +132,33 @@ def write(reading: Reading, folder: str | Path, stem: str | None = None) -> dict
     }
     if paths["pdf"].resolve() == reading.source.resolve():
         raise OptdocError("same-as-source")
-    contents = {  # made before anything is written, so that a failure leaves no half
-        "pdf": searchable_pdf(reading),
+    pdf = searchable_pdf(reading)
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        paths["pdf"].write_bytes(pdf)
+    except OSError as e:
+        raise OptdocError("unwritable") from e
+    reading.tables = _tables_of(paths["pdf"]) if cells else None
+    contents = {
         "reading": json.dumps(reading_as_dict(reading), ensure_ascii=False,
                               indent=1).encode("utf-8"),
         "markdown": markdown(reading).encode("utf-8"),
         "plan": json.dumps(plan_as_dict(reading), indent=1).encode("utf-8"),
     }
     try:
-        target.mkdir(parents=True, exist_ok=True)
         for key, data in contents.items():
             paths[key].write_bytes(data)
     except OSError as e:
         raise OptdocError("unwritable") from e
     return paths
+
+
+def _tables_of(pdf: Path) -> dict[int, list[Table]] | None:
+    """The tables of the PDF written, or None without Camelot or when it failed: tables
+    are a help to the reading, never a reason for it to fail."""
+    if not tables.available():
+        return None
+    try:
+        return tables.find_tables(pdf)
+    except Exception:  # Camelot's own failure on an unusual page
+        return None

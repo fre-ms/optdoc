@@ -24,7 +24,7 @@ from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 from typing import Any, NoReturn, TextIO
 
-from optdoc import __version__, cleanup, offline
+from optdoc import __version__, cleanup, offline, tables
 from optdoc import ocr as ocrlib
 from optdoc.errors import LANGUAGES, OptdocError
 
@@ -41,7 +41,7 @@ def _heic() -> bool:
 def _readers(args: argparse.Namespace) -> dict[str, Any]:
     """What this installation can do."""
     return {"version": __version__, "readers": ocrlib.available_backends(),
-            "clean_up": cleanup.available(), "heic": _heic()}
+            "clean_up": cleanup.available(), "heic": _heic(), "tables": tables.available()}
 
 
 def _plan(path: Path | None) -> dict[int, cleanup.CleanupPlan] | None:
@@ -75,7 +75,8 @@ def _prepare(args: argparse.Namespace) -> dict[str, Any]:
                    clean_up=not args.no_clean_up, with_structure=not args.no_structure,
                    photo=args.photo, progress=_progress if args.progress else None)
     try:
-        paths = output.write(reading, args.out or source.with_name(f"{source.stem}.optdoc"))
+        paths = output.write(reading, args.out or source.with_name(f"{source.stem}.optdoc"),
+                             cells=not args.no_cells)
         return {
             **{k: str(v) for k, v in paths.items()},
             "pages": len(reading.pages),
@@ -83,6 +84,8 @@ def _prepare(args: argparse.Namespace) -> dict[str, Any]:
             "pages_without_text": [n + 1 for n in reading.without_text],
             "cleaned_up": [n + 1 for n in sorted(reading.plan)],
             "reader": reading.reader,
+            "tables": (None if reading.tables is None
+                       else sum(len(t) for t in reading.tables.values())),
         }
     finally:
         reading.close()
@@ -132,6 +135,8 @@ def _parser() -> argparse.ArgumentParser:
     pr.add_argument("--no-clean-up", action="store_true", help="no automatic clean-up")
     pr.add_argument("--no-tables", action="store_true", help="no second pass for table grids")
     pr.add_argument("--no-structure", action="store_true", help="raw OCR lines, no Markdown")
+    pr.add_argument("--no-cells", action="store_true",
+                    help="no tables with their cells in the reading (extra 'tables')")
     pr.add_argument("--progress", action="store_true",
                     help='a line {"page": n, "of": m} on standard error per page')
     be = sub.add_parser("bench", help="score readings against truth files (numbers only)")

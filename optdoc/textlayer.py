@@ -11,21 +11,25 @@ it:
   boxes, so that a slightly tilted line stays one line;
 - every word is scaled (``Tz``) to the width of the printed word, so that a search or
   a selection covers it and a program reading positions finds it where it is printed;
-- between two words stands a real space, stretched over the gap, so that words are
-  never glued together and the line runs on without a jump (MuPDF starts a new line
-  at a jump, PDFKit splits a table into columns at gaps it has to guess);
+- between two words of a cell stands a real space, stretched over the gap, so that
+  words are never glued together and the text runs on without a jump (MuPDF starts a
+  new line at a jump);
+- between two cells of a table (a tab in the page text) stands an ordinary space and
+  the gap stays open, so that a program that finds tables by the gaps between text
+  (Camelot, Tabula, :mod:`optdoc.tables`) sees the columns;
 - the font has a single glyph, a box over the em, which every character of the Basic
   Multilingual Plane is drawn with, and a ``ToUnicode`` map gives each its own code,
   so that "≤", "↑" or "µ" are written as they were read (the standard fonts know only
   Windows-1252).
 
 Text render mode 3 makes it invisible.  The font is a few hundred bytes, built here.
-Measured on photographed invented laboratory reports, read by PDFKit as medorello does:
-every row of the table came out as one line, as with the former word-by-word layer,
-but with real spaces between the words, where PDFKit and MuPDF used to glue some
-together.  With empty glyphs PDFKit read every word as a line of its own; with words
-placed one by one and no space over the gaps, MuPDF read every word of a table row as
-a line of its own.
+Measured on photographed invented laboratory reports in three layouts (54 results):
+PDFKit, as medorello reads, gives every row of every table as one line, with real
+spaces between the words, where it used to glue some together; MuPDF keeps running
+text in one line and gives a table row cell by cell, as it does for a born-digital
+table.  Camelot (hybrid) cut 49 of the 54 rows into the right cells (the other five:
+"U/l" read as "U/I"); with the gaps between cells stretched over as well, it cut none,
+nor did Tabula.  With empty glyphs PDFKit read every word as a line of its own.
 """
 
 from __future__ import annotations
@@ -47,6 +51,7 @@ ASCENT, DESCENT = 800, -200  # a glyph box spans the em: CoreGraphics wants a de
 ADVANCE = 500  # the width of every glyph, in font units
 MAX_SLOPE = math.tan(math.radians(3.0))  # a steeper fit is noise: such a page is straightened
 REPLACEMENT = 0xFFFD  # what a character outside the Basic Multilingual Plane becomes
+SPACE = 0.25  # the width of the space after the last word of a cell, in ems
 
 
 # -- the font ----------------------------------------------------------------------------------
@@ -187,16 +192,20 @@ def add_font(doc: pymupdf.Document) -> int:
 # -- the lines of a page -----------------------------------------------------------------------
 @dataclass
 class _Word:
-    """A word of the page text as it is written: its text and its box in page points."""
+    """A word of the page text as it is written: its text, its box in page points, and
+    whether a cell of a table (or a column) ends with it: the page text has a tab after
+    it (:func:`optdoc.ocr.page_text_from_words`)."""
 
     text: str
     box: pymupdf.Rect
+    cell_ends: bool = False
 
 
 def _lines(page_text: PageText) -> Iterator[list[_Word]]:
     """The words of the page with a box, grouped by their line, left to right."""
     per_line: dict[int, list[_Word]] = {}
-    for a, b in page_text.words():
+    spans = page_text.words()
+    for k, (a, b) in enumerate(spans):
         rects = page_text.rects(a, b)
         text = page_text.text[a:b].strip()
         if not rects or not text:
@@ -204,8 +213,10 @@ def _lines(page_text: PageText) -> Iterator[list[_Word]]:
         box = pymupdf.Rect(rects[0])
         for r in rects[1:]:
             box |= r
+        after = page_text.text[b:spans[k + 1][0]] if k + 1 < len(spans) else ""
         if box.width > 0 and box.height > 0:
-            per_line.setdefault(page_text.line_of(a), []).append(_Word(text, box))
+            per_line.setdefault(page_text.line_of(a), []).append(
+                _Word(text, box, cell_ends="\t" in after))
     for words in per_line.values():
         yield sorted(words, key=lambda w: w.box.x0)
 
@@ -249,8 +260,9 @@ def _scaling(width: float, characters: int, size: float) -> str:
 def _line_operators(words: list[_Word], to_pdf: pymupdf.Matrix) -> list[str]:
     """The operators that write one line: per word its text matrix on the fitted
     baseline (page points turned into the page's own space by ``to_pdf``), the word
-    scaled to its printed width, and a space stretched over the gap to the next word,
-    so that the line runs on without a jump."""
+    scaled to its printed width, and a space: stretched over the gap to the next word
+    inside a cell, so that the text runs on without a jump; of ordinary width where a
+    cell ends, so that the gap between the cells stays open."""
     slope, intercept, size = _baseline(words)
     angle = math.atan(slope)
     along = pymupdf.Point(math.cos(angle), math.sin(angle))  # page points, y downwards
@@ -265,8 +277,9 @@ def _line_operators(words: list[_Word], to_pdf: pymupdf.Matrix) -> list[str]:
         scaling = _scaling(word.box.width / math.cos(angle), len(word.text), size)
         operators.append(f"{matrix} Tm {scaling} Tz <{_hex(word.text)}> Tj")
         if i < len(words) - 1:  # boxes that touch or overlap still get a narrow space
-            gap = max(words[i + 1].box.x0 - word.box.x1, 0.05 * size) / math.cos(angle)
-            operators.append(f"{_scaling(gap, 1, size)} Tz <0020> Tj")
+            gap = (SPACE * size if word.cell_ends
+                   else max(words[i + 1].box.x0 - word.box.x1, 0.05 * size))
+            operators.append(f"{_scaling(gap / math.cos(angle), 1, size)} Tz <0020> Tj")
     return operators
 
 

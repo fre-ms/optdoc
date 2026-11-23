@@ -4,7 +4,8 @@ application (a Tauri sidecar, for medorello).
 
 Build it with ``packaging/build.py``, which names the file after the target platform
 and tries it out.  Everything travels inside: Python, PyMuPDF, OpenCV, ONNX Runtime,
-RapidOCR with its models, pillow-heif.  Nothing is downloaded at run time.
+RapidOCR with its models, pillow-heif, Camelot with pandas and pdfium for the tables.
+Nothing is downloaded at run time.
 
 Environment: ``OPTDOC_BINARY_NAME`` (the file's name), ``OPTDOC_CODESIGN_IDENTITY`` (a
 Developer ID for macOS; without it the build is signed ad hoc), ``OPTDOC_ONEDIR`` (a
@@ -12,6 +13,7 @@ folder of that name, with the program ``optdoc`` in it, instead of one file).
 """
 
 import os
+import sys
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_all, collect_dynamic_libs, collect_submodules
@@ -20,12 +22,19 @@ root = Path(SPECPATH).parent  # noqa: F821 (given by PyInstaller)
 identity = os.environ.get("OPTDOC_CODESIGN_IDENTITY") or None
 
 datas, binaries, hiddenimports = [], [], []
-for package in ("rapidocr", "onnxruntime", "pymupdf"):  # rapidocr: its models and settings
+# rapidocr: its models and settings; camelot and playa: their parsers; pypdfium2: pdfium
+for package in ("rapidocr", "onnxruntime", "pymupdf", "camelot", "playa", "pypdfium2",
+                "pypdfium2_raw"):
     d, b, h = collect_all(package)
     datas += d
     binaries += b
     hiddenimports += h
 binaries += collect_dynamic_libs("pillow_heif")
+# packages compiled with mypyc (playa) import a helper module with a hashed name that
+# PyInstaller does not see
+for path in sys.path:
+    if Path(path).is_dir():
+        hiddenimports += sorted({f.name.split(".")[0] for f in Path(path).glob("*__mypyc*")})
 hiddenimports += collect_submodules("optdoc")
 hiddenimports += ["pillow_heif", "PIL.Image", "PIL.ImageFilter", "PIL.ImageOps", "cv2",
                   "shapely", "pyclipper", "omegaconf", "colorlog", "yaml"]

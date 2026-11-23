@@ -14,7 +14,7 @@ from pathlib import Path
 import pymupdf
 import pytest
 
-from optdoc import __version__, offline
+from optdoc import __version__, offline, tables
 from optdoc import ocr as ocrlib
 from optdoc.cli import INTERFACE, main
 from optdoc.errors import KINDS
@@ -44,7 +44,7 @@ def test_readers(capsys: pytest.CaptureFixture[str]) -> None:
     """What an installation can do, under the names medorello reads."""
     status, answer, _ = _answer(capsys, ["readers"])
     assert status == 0
-    assert set(answer) == HEAD | {"version", "readers", "clean_up", "heic"}
+    assert set(answer) == HEAD | {"version", "readers", "clean_up", "heic", "tables"}
     assert answer["interface"] == INTERFACE and answer["version"] == __version__
     assert answer["made_with"] == f"optdoc {__version__}"
     assert set(answer["readers"]) <= {"rapidocr", "tesseract"}
@@ -113,7 +113,8 @@ def test_answer_names_the_results(tmp_path: Path, report: Path,
                                            str(tmp_path / "out")])
     assert status == 0 and err == ""
     assert set(answer) == HEAD | {"pdf", "reading", "markdown", "plan", "pages", "ocr_pages",
-                                  "pages_without_text", "cleaned_up", "reader"}
+                                  "pages_without_text", "cleaned_up", "reader", "tables"}
+    assert answer["tables"] == (0 if tables.available() else None)  # a letter has none
     assert answer["pages"] == 2 and answer["ocr_pages"] == [] and answer["cleaned_up"] == []
     assert all(Path(answer[k]).parent == tmp_path / "out"
                for k in ("pdf", "reading", "markdown", "plan"))

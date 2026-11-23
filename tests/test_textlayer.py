@@ -1,6 +1,7 @@
-"""The invisible text layer: its font, one line per OCR line with real spaces, every
-character as it was read, words where they are printed, pages turned or sharing their
-resources; and on macOS, a printed row read by PDFKit as one line."""
+"""The invisible text layer: its font, one line per OCR line with real spaces, the gaps
+between table cells left open, every character as it was read, words where they are
+printed, pages turned or sharing their resources; and on macOS, a printed row read by
+PDFKit as one line."""
 
 from __future__ import annotations
 
@@ -18,12 +19,25 @@ from optdoc.ocr import OCRWord, page_text_from_words
 from optdoc.reading import read
 from tests.synthetic import lab_report, photograph
 
-ROWS = [  # (text, x0, y0) of every word: two rows of a laboratory table and a heading
+ROWS = [  # (text, x0, y0) of every word: a heading, two rows of a laboratory table, a sentence
     [("Befund", 60, 60)],
     [("Kalium", 60, 100), ("5,8", 200, 100), ("mmol/l", 260, 100), ("3,5", 340, 100),
      ("-", 365, 100), ("5,1", 375, 100), ("↑", 420, 100)],
     [("Albumin", 60, 120), ("≤", 200, 120), ("3,5", 212, 120), ("µg/ml", 260, 120)],
+    [("Kontrolle", 60, 140), ("in", 120, 140), ("sechs", 136, 140), ("Monaten", 172, 140)],
 ]
+CELLS = ["Befund", "Kalium", "5,8", "mmol/l", "3,5 - 5,1", "↑", "Albumin", "≤ 3,5", "µg/ml",
+         "Kontrolle in sechs Monaten"]
+
+
+def _sentence(y: float) -> list[tuple[str, float, float]]:
+    """A sentence 360 pt long, its words parted by ordinary gaps (6 pt, 0.6 of their
+    height)."""
+    words, x = [], 60.0
+    for text in "Die Beschwerden bestehen seit etwa einem Jahr und nehmen langsam zu".split():
+        words.append((text, x, y))
+        x += 6 * len(text) + 6
+    return words
 
 
 def _words(rows: list[list[tuple[str, float, float]]], slope: float = 0.0) -> list[OCRWord]:
@@ -57,14 +71,14 @@ def test_font() -> None:
     assert len(data) < 1024
 
 
-def test_lines_with_spaces_and_every_character() -> None:
-    """Each OCR line comes out as one line, its words parted by real spaces, characters
-    outside Windows-1252 as they were read; a search finds the word where it is
-    printed, no wider."""
+def test_cells_with_spaces_and_every_character() -> None:
+    """Running text comes out as one line, its words parted by real spaces; a table row
+    cell by cell, with the words of a cell together (MuPDF reads it so, as it reads a
+    born-digital table); characters outside Windows-1252 as they were read; a search
+    finds the word where it is printed, no wider."""
     with _page_with_layer(_words(ROWS)) as doc:
         page = doc[0]
-        assert page.get_text().splitlines() == [
-            "Befund", "Kalium 5,8 mmol/l 3,5 - 5,1 ↑", "Albumin ≤ 3,5 µg/ml"]
+        assert [z.strip() for z in page.get_text().splitlines()] == CELLS
         found = page.search_for("mmol/l")
         assert len(found) == 1
         assert abs(found[0].x0 - 260) < 0.5 and abs(found[0].x1 - 296) < 1.0
@@ -75,11 +89,11 @@ def test_lines_with_spaces_and_every_character() -> None:
 def test_tilted_line_stays_one_line() -> None:
     """A line tilted by 2° (so far that the first and the last word do not overlap in
     height) is still one line, written along its own slope."""
-    words = _words(ROWS[1:2], slope=0.035)
+    words = _words([_sentence(100)], slope=0.035)
     assert words[-1].y0 > words[0].y1
     with _page_with_layer(words) as doc:
         lines = doc[0].get_text().splitlines()
-    assert lines == ["Kalium 5,8 mmol/l 3,5 - 5,1 ↑"]
+    assert lines == [" ".join(w.text for w in words)]
 
 
 @pytest.mark.parametrize("rotation", [90, 180, 270])
@@ -87,7 +101,7 @@ def test_turned_page(rotation: int) -> None:
     """On a page turned by ``/Rotate`` the words lie where they are shown."""
     with _page_with_layer(_words(ROWS), rotation) as doc:
         page = doc[0]
-        assert page.get_text().splitlines()[1] == "Kalium 5,8 mmol/l 3,5 - 5,1 ↑"
+        assert [z.strip() for z in page.get_text().splitlines()] == CELLS
         found = page.search_for("Kalium")[0]
         assert abs(found.x0 - 60) < 0.5 and abs(found.y0 - 100) < 1.0
 

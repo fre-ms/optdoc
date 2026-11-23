@@ -461,17 +461,15 @@ def available_backends() -> list[str]:
 
 
 # -- words -> PageText ---------------------------------------------------------------------------
-class _GapMeasure(NamedTuple):
-    """How many gaps between neighbouring words the page has, and the usual (median)
-    gap width in points."""
+CELL_GAP = 1.0  # in word heights: a wider gap is no word space but a cell boundary
 
-    gaps: int
-    usual: float
 
-    def is_cell_boundary(self, space: float, line_height: float) -> bool:
-        """A gap far wider than usual (table cells, columns); judged only once the
-        page has enough gaps for the usual width to mean something."""
-        return self.gaps >= 4 and space > max(1.5 * line_height, 3.0 * self.usual)
+def _cell_boundary(space: float, line_height: float) -> bool:
+    """True for a gap wider than the word is high: no word space (a quarter to half an em)
+    but the boundary of a table cell or a column.  Measured on invented laboratory
+    reports in three layouts: the former rule, a gap far wider than the page's usual one,
+    found no boundary at all in two of them, whose gaps are mostly column gaps."""
+    return space > CELL_GAP * line_height
 
 
 def _same_line(w: OCRWord, ref: OCRWord) -> bool:
@@ -502,13 +500,6 @@ def _lines_from_words(words: Iterable[OCRWord]) -> list[list[OCRWord]]:
     return lines
 
 
-def _gap_measure(lines: list[list[OCRWord]]) -> _GapMeasure:
-    """Count and median of the positive gaps between neighbouring words of a line."""
-    spaces = sorted(b.x0 - a.x1 for z in lines for a, b in zip(z, z[1:], strict=False)
-                     if b.x0 > a.x1)
-    return _GapMeasure(len(spaces), spaces[len(spaces) // 2] if spaces else 0.0)
-
-
 def _append_word(page_text: PageText, w: OCRWord, line_no: int) -> None:
     """Append the word's characters to line ``line_no`` with boxes from an even split of the
     word box, then record the word's confidence and its span in the page text."""
@@ -528,16 +519,14 @@ def page_text_from_words(
     words: Iterable[OCRWord], number: int, width: float, height: float
 ) -> PageText:
     """Group words into lines by vertical overlap, order them, and build the character map.
-    A gap between neighbouring words far wider than usual (table cells, columns) becomes
-    a tab in the page text: the rules treat it like a space, the Markdown structuring
-    reads it as a cell boundary."""
+    A gap wider than the word is high (table cells, columns) becomes a tab in the page
+    text: the rules treat it like a space, the Markdown structuring reads it as a cell
+    boundary, and the text layer leaves the gap open there (:mod:`optdoc.textlayer`)."""
     page_text = PageText(number=number, width=width, height=height, source="ocr")
-    lines = _lines_from_words(words)
-    measure = _gap_measure(lines)
-    for line_no, line in enumerate(lines, 1):
+    for line_no, line in enumerate(_lines_from_words(words), 1):
         for i, w in enumerate(line):
             if i > 0:
-                cell_boundary = measure.is_cell_boundary(w.x0 - line[i - 1].x1, w.y1 - w.y0)
+                cell_boundary = _cell_boundary(w.x0 - line[i - 1].x1, w.y1 - w.y0)
                 page_text._append_char("\t" if cell_boundary else " ", None, line_no,
                                        w.y1 - w.y0, w.y1)
             _append_word(page_text, w, line_no)
