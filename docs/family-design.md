@@ -29,7 +29,7 @@ own and together, each replaceable by another program:
 | **optdoc** | make the page faithful: upright, unwarped, in its true proportions, evenly lit, in its own colours | a photo, a scan, any PDF | a PDF of the prepared pages |
 | **ocrdoc** | recognise: areas, text, tables, barcodes | any PDF (optdoc's, or another program's) | the same pages with a text layer, the reading, Markdown |
 | **semdoc** | understand: medical terms and identifying information, with their codes (through lexterm and lexident) | a reading | the annotations |
-| **tagdoc** | describe: what the document is (kind, date, sender, recipient) | a document with its reading and annotations | its metadata (in the PDF and beside it) |
+| **tagdoc** | describe: what the document is (title, kind, date, authors, the people it names) | ocrdoc's PDF (and semdoc's annotations, once there) | its metadata as medRDS says (XMP and the information dictionary in the PDF, or a sidecar) |
 | **docrepro** | the whole way, in one window and one program | a photo or a scan | a real digital document |
 
 A small shared core, **doccor** (as lexcor is for lexterm and lexident), holds what every
@@ -133,9 +133,15 @@ as they are.
 reading, with their spans and boxes and codes, for a person to confirm (`<stem>.semdoc`
 holds the proposals and the decisions). It waits for lexterm and lexident to be libraries.
 
-**tagdoc** sets a document's metadata from its reading and annotations, for a person to
-confirm, and writes them into the PDF (XMP) and beside it. Its vocabulary (medRDS, FHIR
-`DocumentReference`) is to be settled with medorello.
+**tagdoc** suggests what a document is (title, kind, clinical date, language; from its text,
+later from semdoc's annotations), a person confirms or completes it (authors, institution,
+the people it names, with copies of their cards from an address book), and tagdoc writes it
+as medRDS chapter 7 says: XMP with the information dictionary in step, or a sidecar for a PDF
+signed by someone else. The standard keeps its vocabulary and its reference library (in
+JavaScript, which medorello and medonomina use to file); tagdoc writes the same packet in
+Python, character by character, and its tests let the reference library read it back. What
+belongs to filing (the record, the versions, who filed it, where it came from) stays the
+records app's.
 
 **The core, doccor,** holds what all tools share: the configuration document (head, SHA-256, frame,
 rounding, embedding in a PDF, the deterministic file identifier), the command line's
@@ -152,8 +158,8 @@ program, not four of 160 MB each.
 
 **semdoc and tagdoc** have their places in docrepro from the start (orders 30 and 40, what
 they take and give, their formats). A step joins the chain by being installed: docrepro
-brings the adapters of optdoc and ocrdoc, and a step to come brings its own through the
-entry-point group `docrepro.steps` (an adapter opens the step's project on its input, gives
+brings the adapters of optdoc and ocrdoc, and any other step brings its own through the
+entry-point group `docrepro.steps` (tagdoc does) (an adapter opens the step's project on its input, gives
 its configuration document, writes its result and names the pages whose decisions went).
 A chain document that names a step which is not installed is refused (`step-missing`).
 
@@ -210,7 +216,7 @@ available for whoever has not moved yet.
 - **ocrdoc** comes out of optdoc with the history of its modules (`git filter-repo`), as
   optdoc came out of PseudonyMed.
 - **doccor** and **docrepro** are new repositories; doccor's code moves out of optdoc.
-- **semdoc** and **tagdoc** follow later.
+- **tagdoc** is a new repository (26 November 2026); **semdoc** follows later.
 
 All AGPL-3.0, the core too: code that two applications share is application code (the
 user's rule; MIT is for what a program takes from a standard).
@@ -228,7 +234,8 @@ Each stage is released and tested before the next; each keeps the chain reproduc
    ocrdoc and optdoc, the window's panels).
 4. **Models** as an optional download (areas, handwriting, orientation), each measured
    against the rules it would replace.
-5. **semdoc**, once lexterm and lexident are libraries; then **tagdoc**.
+5. **tagdoc** (built 26 November 2026, before the standalone program, at the user's request);
+   **semdoc**, once lexterm and lexident are libraries.
 
 ## Decided (the user, 26 November 2026)
 
@@ -241,3 +248,6 @@ Each stage is released and tested before the next; each keeps the chain reproduc
   register (`docs/name-search-docrepro-2026-11-26.md`).
 - The configuration documents are named `<stem>.<tool>.json` ("clearer, more honest").
 - Every tool's verbs are `run`, `edit` and `about`.
+- tagdoc uses the standard (the user, the same night): writing a document's metadata, vCards
+  in XMP among them, stays in medRDS's reference library for the apps that file; tagdoc writes
+  the descriptive part of chapter 7 in Python, as the library does.
