@@ -21,4 +21,4 @@ The modules:
 - :mod:`optdoc.cli` and :mod:`optdoc.bench`: the command line and the test bench.
 """
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"

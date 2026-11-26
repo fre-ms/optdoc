@@ -73,12 +73,30 @@ class Role:
     table: int = -1
 
 
+GRID = 1000  # tables with a known grid are numbered from here, apart from those found by gaps
+
+
 @dataclass
 class Structure:
     """The roles of the lines of one page; :meth:`render` turns a page text into
-    Markdown.  Built by :func:`analyse_structure`."""
+    Markdown.  Built by :func:`analyse_structure`; tables whose grid is known come in
+    with :meth:`use_tables`."""
 
     roles: list[Role] = field(default_factory=list)
+    grids: dict[int, list[list[str]]] = field(default_factory=dict)
+
+    def use_tables(self, page_text: PageText,
+                   tables: list[tuple[Box, list[list[str]]]]) -> None:
+        """Tables whose grid is known (a box and the texts of its cells, row by row,
+        :mod:`optdoc.layout`): the lines whose middle lies in a table's box are its rows,
+        and the table is written from its cells, not from the gaps between words."""
+        lines = lines_of(page_text)
+        for k, (box, rows) in enumerate(tables):
+            self.grids[GRID + k] = rows
+            for line, role in zip(lines, self.roles, strict=False):
+                x, y = (line.x0 + line.x1) / 2, (line.y0 + line.y1) / 2
+                if not line.empty and box[0] <= x <= box[2] and box[1] <= y <= box[3]:
+                    role.kind, role.table = "table", GRID + k
 
     @property
     def tables(self) -> int:
@@ -97,7 +115,8 @@ class Structure:
         segments = self._segments(text)
         if segments is None:
             return text
-        return "\n\n".join(b for b in _blocks(self.roles, segments) if b.strip()) + "\n"
+        return "\n\n".join(b for b in _blocks(self.roles, segments, self.grids)
+                           if b.strip()) + "\n"
 
     def _segments(self, text: str) -> list[str] | None:
         """The lines of ``text`` when they match the roles one to one (a trailing
@@ -126,16 +145,24 @@ def _block_key(idx: int, piece: _Piece) -> tuple[str, int]:
     return "paragraph", 0
 
 
-def _blocks(roles: list[Role], segments: list[str]) -> Iterator[str]:
-    """The Markdown blocks of a page in order; some of them may be empty."""
+def _blocks(roles: list[Role], segments: list[str],
+            grids: dict[int, list[list[str]]] | None = None) -> Iterator[str]:
+    """The Markdown blocks of a page in order; some of them may be empty.  A table whose
+    grid is known (``grids``) is written once, where its first line is, from its cells."""
     paragraph = _Paragraph()
     numbered = enumerate(zip(roles, segments, strict=True))
-    for (kind, _), run in groupby(numbered, key=lambda p: _block_key(*p)):
+    written: set[int] = set()
+    for (kind, key), run in groupby(numbered, key=lambda p: _block_key(*p)):
         pieces = [piece for _i, piece in run]
         if kind == "paragraph":
             yield from _paragraph_blocks(pieces, paragraph)
             continue
         yield paragraph.closing()
+        if kind == "table" and grids and key in grids:
+            if key not in written:
+                written.add(key)
+                yield _table(grids[key])
+            continue
         yield _BLOCK_BUILDERS[kind](pieces)
     yield paragraph.closing()
 

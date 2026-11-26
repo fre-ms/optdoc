@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.6.0 (2026-11-26)
+
+Areas, as in FineReader: a page is divided into regions, found automatically and corrected by
+hand, and a table's grid can be set. The first of several steps: tables are found automatically;
+pictures, barcodes, handwriting and stamps are set by hand for now. Interface 2 and the formats
+of the configuration and the reading (version 1) gain fields; nothing is taken away.
+
+### Added
+
+- **Areas** (`optdoc.layout`): text, table, image, barcode, handwriting, stamp, ignore, each with
+  its box in points of the cleaned page and who set it ("auto" or "person"); a table with its grid
+  (inner column and row lines, merged cells) and operations on it (add, move and remove a line,
+  merge and split cells, move and resize with the grid). What lies in no area is text. Words in
+  pictures, barcodes and "ignore" areas stay out of the text, the text layer and the reading;
+  handwriting and stamps are read and marked.
+- **The window's tab "Areas"** between clean-up and text: the areas in their colours, numbered in
+  reading order; a drawing tool per kind; select, move, resize, change the kind, delete; for a
+  table add a column or row line, drag one, take one away, merge cells by dragging over them and
+  split them by a click; find the areas again.
+- The configuration keeps every page's areas (`layout`, with `by`) and the setting `cells`; the
+  reading lists every page's `regions` and says of each table who set it (`by`).
+- `Project.regions`, `set_regions`, `find_regions`, `forget_regions`; `read(..., cells=...)`.
+
+### Changed
+
+- The tables of a page come from its table areas: every word goes into the cell of the grid its
+  middle lies in. Camelot finds the tables of a page once, on that page in memory, and they are
+  stored with the configuration, so that a reproduction does not run Camelot again. Measured on
+  12 photographed and 12 born-digital invented reports: the same cells as before, row for row
+  (211 of 216 photographed rows cut right, 196 read exactly; every born-digital row).
+- The Markdown writes a table with a grid from its cells.
+- `--no-cells` is a setting of the configuration; beside `--config` it leaves out the tables
+  found before, but not those a person set.
+- A table a person changed counts as certain (`confidence` 1).
+
+### Removed
+
+- `output.write(..., cells=...)`: the tables are made with the reading (`Options.cells`).
+
 ## 0.5.0 (2026-11-23)
 
 Photos taken at a slant. Interface 2 and the configuration's format are unchanged, but a

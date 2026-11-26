@@ -82,10 +82,15 @@ def test_photographed_report(tmp_path: Path) -> None:
         page = json.loads(paths["reading"].read_text(encoding="utf-8"))["pages"][0]
         assert page["tables"] and all(t["confidence"] > 0 for t in page["tables"])
         assert {"text", "box"} == set(page["tables"][0]["rows"][1][0])
-        output.write(reading, tmp_path / "ohne", cells=False)
+        assert page["regions"][0]["kind"] == "table" and page["regions"][0]["table"] == 0
+    finally:
+        reading.close()
+    reading = read(tmp_path / "foto.jpg", cells=False)
+    try:
+        output.write(reading, tmp_path / "ohne")
         assert reading.tables is None
         page = json.loads((tmp_path / "ohne" / "foto.reading.json").read_text())["pages"][0]
-        assert page["tables"] is None
+        assert page["tables"] is None and page["regions"] == []
     finally:
         reading.close()
 

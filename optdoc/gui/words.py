@@ -16,7 +16,8 @@ WORDS: dict[str, tuple[str, str]] = {  # key: (English, German)
     "page": ("Page {number}", "Seite {number}"),
     "page_corrected": ("Page {number} ✎", "Seite {number} ✎"),
     "tab_cleanup": ("1 Clean up", "1 Aufbereiten"),
-    "tab_text": ("2 Check the text", "2 Text prüfen"),
+    "tab_regions": ("2 Areas", "2 Bereiche"),
+    "tab_text": ("3 Check the text", "3 Text prüfen"),
     "apply": ("Apply", "Übernehmen"),
     "later": ("Save and continue later", "Speichern und später weitermachen"),
     "cancel": ("Cancel", "Abbrechen"),
@@ -102,6 +103,49 @@ WORDS: dict[str, tuple[str, str]] = {  # key: (English, German)
     "as_read": ("as read", "wie gelesen"),
     "uncertain": ("{n} word(s) read with little confidence", "{n} Wort/Wörter unsicher gelesen"),
     "zoom_reset": ("1:1", "1:1"),
+    # areas
+    "kind_text": ("Text", "Text"),
+    "kind_table": ("Table", "Tabelle"),
+    "kind_image": ("Picture", "Bild"),
+    "kind_barcode": ("Barcode", "Barcode"),
+    "kind_handwriting": ("Handwriting", "Handschrift"),
+    "kind_stamp": ("Stamp", "Stempel"),
+    "kind_ignore": ("Do not read", "Nicht lesen"),
+    "kind": ("Kind of the area selected", "Art des ausgewählten Bereichs"),
+    "kind_tip": ("Gives the area selected another kind",
+                 "Gibt dem ausgewählten Bereich eine andere Art"),
+    "tools": ("Tools", "Werkzeuge"),
+    "tool_select": ("Select, move, resize; drag a table's lines",
+                    "Auswählen, verschieben, Größe ändern; Tabellenlinien ziehen"),
+    "tool_draw": ("Draw an area", "Bereich zeichnen"),
+    "tool_column": ("Add a column line (click in the table)",
+                    "Spaltenlinie einfügen (in die Tabelle klicken)"),
+    "tool_row": ("Add a row line (click in the table)",
+                 "Zeilenlinie einfügen (in die Tabelle klicken)"),
+    "tool_remove": ("Remove a line (click on it)", "Linie entfernen (darauf klicken)"),
+    "tool_merge": ("Merge cells (drag over them) or split them (click)",
+                   "Zellen verbinden (darüber ziehen) oder trennen (klicken)"),
+    "delete_region": ("Delete the area", "Bereich löschen"),
+    "find_again": ("Find the areas again", "Bereiche neu erkennen"),
+    "regions_help": ("What is in no area is read as text. Pictures, barcodes and areas not to "
+                     "be read stay out of the text; handwriting and stamps are read and marked. "
+                     "The numbers are the order of reading. Delete or Backspace deletes the area "
+                     "selected, Escape goes back to selecting.",
+                     "Was in keinem Bereich liegt, wird als Text gelesen. Bilder, Barcodes und "
+                     "Bereiche, die nicht gelesen werden sollen, bleiben aus dem Text; "
+                     "Handschrift und Stempel werden gelesen und markiert. Die Nummern sind die "
+                     "Lesereihenfolge. Entf oder Rückschritt löscht den ausgewählten Bereich, "
+                     "Escape kehrt zum Auswählen zurück."),
+    "regions_auto": ("Areas found by optdoc: {count}", "Von optdoc erkannte Bereiche: {count}"),
+    "regions_person": ("Areas set by hand: {count}", "Von Hand gesetzte Bereiche: {count}"),
+    "regions_table": ("Table selected: {rows} rows, {columns} columns",
+                      "Ausgewählte Tabelle: {rows} Zeilen, {columns} Spalten"),
+    "regions_no_tables": ("Tables are not found automatically here (extra 'tables' or "
+                          "--no-cells); they can be drawn.",
+                          "Tabellen werden hier nicht automatisch erkannt (Extra „tables“ oder "
+                          "--no-cells); sie lassen sich zeichnen."),
+    "finding_regions": ("Finding the areas of page {number} …",
+                        "Erkenne die Bereiche auf Seite {number} …"),
 }
 
 LANGUAGES = ("en", "de")

@@ -68,10 +68,14 @@ def _project(args: argparse.Namespace) -> Project:
     if args.config is not None:
         if any(getattr(args, name) is not None for name in _SETTINGS):
             raise OptdocError("usage")
-        return Project.open(args.file, config=load_config(args.config))
+        project = Project.open(args.file, config=load_config(args.config))
+        if args.no_cells:  # as before the configuration held it: no tables found
+            project.leave_out_found_tables()
+        return project
     options = Options(reader=args.reader or "auto", languages=args.languages,
                       tables=not args.no_tables, paper=args.paper or "a4", photo=args.photo,
-                      clean_up=not args.no_clean_up, structure=not args.no_structure)
+                      clean_up=not args.no_clean_up, structure=not args.no_structure,
+                      cells=not args.no_cells)
     return Project.open(args.file, options)
 
 
@@ -86,7 +90,7 @@ def _results(project: Project, args: argparse.Namespace) -> dict[str, Any]:
 
     reading = project.build(_progress if args.progress else None)
     try:
-        paths = output.write(reading, _out(args), cells=not args.no_cells)
+        paths = output.write(reading, _out(args))
         return {
             **{k: str(v) for k, v in paths.items()},
             "pages": len(reading.pages),
@@ -178,7 +182,8 @@ def _document_options(pr: argparse.ArgumentParser) -> None:
     pr.add_argument("--no-structure", action="store_const", const=True,
                     help="raw OCR lines, no Markdown")
     pr.add_argument("--no-cells", action="store_true",
-                    help="no tables with their cells in the reading (extra 'tables')")
+                    help="find no tables with their cells (extra 'tables'); "
+                         "a person can still set them in the window")
     pr.add_argument("--progress", action="store_true",
                     help='a line {"page": n, "of": m} on standard error per page')
 

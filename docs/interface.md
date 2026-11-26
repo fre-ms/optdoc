@@ -8,7 +8,7 @@ Every answer carries `interface`. It goes up when something a caller relies on c
 that breaks it: a field or a kind of error removed or renamed, a meaning changed. Within one
 interface, new fields, new options and new kinds of error may come; a caller ignores fields it
 does not know and treats an unknown kind of error like any other (its message says what
-happened). Releases are tagged (`v0.5.0`); pin a tag, not a branch.
+happened). Releases are tagged (`v0.6.0`); pin a tag, not a branch.
 
 **From interface 1:** the configuration (`<stem>.optdoc.json`, `--config`, answer field `config`)
 takes the place of the plan (`<stem>.plan.json`, `--plan`, answer field `plan`), and the kind of
@@ -37,12 +37,12 @@ Every answer has these two fields:
 | field | example | meaning |
 |---|---|---|
 | `interface` | `2` | the version of this description |
-| `made_with` | `"optdoc 0.5.0"` | the program and its version, for the record of what made a file |
+| `made_with` | `"optdoc 0.6.0"` | the program and its version, for the record of what made a file |
 
 ## `readers`: what this installation can do
 
 ```json
-{"interface": 2, "made_with": "optdoc 0.5.0", "version": "0.5.0",
+{"interface": 2, "made_with": "optdoc 0.6.0", "version": "0.6.0",
  "readers": ["rapidocr", "tesseract"], "clean_up": true, "heic": true, "tables": true,
  "window": true}
 ```
@@ -86,7 +86,7 @@ then decides every setting; `--reader`, `--languages`, `--paper`, `--photo`, `--
 The answer:
 
 ```json
-{"interface": 2, "made_with": "optdoc 0.5.0",
+{"interface": 2, "made_with": "optdoc 0.6.0",
  "pdf": "<folder>/<stem>.pdf", "reading": "<folder>/<stem>.reading.json",
  "markdown": "<folder>/<stem>.md", "config": "<folder>/<stem>.optdoc.json",
  "pages": 2, "ocr_pages": [1, 2], "pages_without_text": [], "cleaned_up": [1, 2],
@@ -97,17 +97,22 @@ Pages are counted from 1. `ocr_pages` were read by OCR (the others had a text la
 `pages_without_text` hold no text at all afterwards (no layer, no engine, or nothing legible),
 `cleaned_up` were changed by the clean-up, `corrected` are pages whose text a person corrected
 (in the window; carried by the configuration), `reader` is the engine used (`null` without one),
-`tables` the number of tables found with their cells (`null` when they were not looked for:
-`--no-cells`, or the extra "tables" is not installed, or Camelot failed).
+`tables` the number of tables with their cells (`null` when they were neither looked for,
+`--no-cells` or the extra "tables" not installed, nor set by a person).
 
-**Tables.** The tables of every page, with their cells, go into the reading (below); a laboratory
-result then is a row of cells (name, value, unit, range, flag) rather than a line to take apart.
-optdoc finds them with Camelot in the PDF it has just written, on scanned and photographed pages
-in its own text layer. Measured on invented laboratory reports in three layouts: of 216 results
-in born-digital PDFs every row came out cut into the right cells and read exactly; of 216 in
-photos, 211 cut right and 193 read exactly (the rest are misreadings such as "U/I" for "U/l").
-`--no-cells` leaves them out (about 4 s less for the standalone program as one file, 0.7 s as a
-folder).
+**Areas and tables.** Every page is divided into areas (regions): text, tables with their grid
+of rows and columns, pictures, barcodes, handwriting, stamps, and areas not to be read. optdoc
+finds the tables with Camelot, on scanned and photographed pages in its own text layer, and keeps
+each as an area with its grid; a person can correct every area and grid in the window (below).
+The words of a page then go into the cells of the grid they lie in, so that a laboratory result
+is a row of cells (name, value, unit, range, flag) rather than a line to take apart. Measured on
+invented laboratory reports in three layouts: of 216 results in born-digital PDFs every row came
+out cut into the right cells and read exactly; of 216 in photos, 211 cut right and 196 read
+exactly (the rest are misreadings such as "U/I" for "U/l"). Words in pictures, barcodes and areas
+not to be read stay out of the text, the text layer and the reading; handwriting and stamps are
+read and marked, so that a program can treat them apart. What lies in no area is read as text.
+`--no-cells` finds no tables (about 4 s less for the standalone program as one file, 0.7 s as a
+folder); beside `--config` it also leaves out the tables found before, but not a person's.
 
 **Photos and scans.** A page without text is cleaned up by the configuration given, else by
 optdoc's suggestion. The suggestion tells a photographed page from a scanned one by the page
@@ -148,12 +153,17 @@ optdoc edit <file> --out <folder> [--config <file.optdoc.json | file.pdf>] [--la
 
 Opens a window on the file, in German or English (`--language`, else the system's language),
 and asks to bring it to the front. It starts as `prepare` would (optdoc's suggestions, or the configuration
-given), so that **Apply** at once gives the same files as `prepare`. Two tabs:
+given), so that **Apply** at once gives the same files as `prepare`. Three tabs, in FineReader's
+order:
 
 - **Clean up:** the page before and after, every step switchable with its strength, rotation,
   the sheet's four corners dragged on the page before (also where optdoc found none), areas erased
   by dragging on the page after (Cmd/Ctrl+Z takes them back), the suggestion restored, a page left
   as it came, the steps copied to every page, the orientation detected.
+- **Areas:** the areas optdoc found, in their colours and numbered in reading order; a tool to
+  draw an area of each kind, to select, move and resize one and change its kind, to delete it,
+  and for a table to add a column or row line, drag one, take one away, and merge cells or split
+  them again; "find again" brings optdoc's areas back.
 - **Check the text:** the page as OCR read it, words read with little confidence marked yellow, a
   click on a word selects it in the text; the text beside it, to be corrected by hand. A
   correction goes into the PDF's text layer, the reading (as words `"by": "person"`) and the
@@ -175,13 +185,18 @@ caller waits until it is closed. It keeps no settings of its own and writes noth
 ## The configuration: `optdoc-config`, version 1
 
 ```json
-{"format": "optdoc-config", "version": 1, "made_with": "optdoc 0.5.0",
+{"format": "optdoc-config", "version": 1, "made_with": "optdoc 0.6.0",
  "source": {"sha256": "…", "bytes": 245678, "suffix": ".jpg"},
  "options": {"reader": "auto", "languages": null, "tables": true, "paper": "a4", "photo": null,
-             "clean_up": true, "structure": true, "dpi": 300},
+             "clean_up": true, "structure": true, "dpi": 300, "cells": true},
  "reader": "rapidocr",
  "pages": [{"page": 1, "plan": {"rotation": 0, "straighten": true, "angle": 2.1, "…": "…"},
             "ocr": true, "words": [["Kalium", 56.2, 210.4, 89.9, 221.0, 0.998], "…"],
+            "layout": {"by": "person", "regions": [
+                {"kind": "text", "box": [56.2, 40.0, 536.0, 140.0], "by": "person"},
+                {"kind": "table", "box": [56.2, 150.1, 536.0, 451.3], "by": "auto",
+                 "columns": [226.2, 296.2, 386.0, 496.0], "rows": [168.4, 186.2, "…"],
+                 "merged": [[0, 0, 0, 4]], "confidence": 0.863}]},
             "correction": null}]}
 ```
 
@@ -189,12 +204,18 @@ Everything that decides the result, and nothing else: no paths, no times. `sourc
 it belongs to by its SHA-256; for another file it is refused (`config-mismatch`). `options` are
 the settings. Per page: its clean-up `plan` (`null` for a page with a text layer; a plan may do
 nothing and still keep the sheet's corners it found), whether it was read by `ocr` (`null`: not
-read yet), the `words` OCR read (text, box in points, confidence), and the person's `correction`
-of the page text (`null`: as read).
+read yet), the `words` OCR read (text, box in points, confidence), its `layout` (`null`: not
+found yet; `by` "auto" as optdoc found it, "person" once a person changed it), and the person's
+`correction` of the page text (`null`: as read). An area has its `kind`, its `box` in points of
+the cleaned page and who set it (`by`); a table also its inner column lines (`columns`, x) and
+row lines (`rows`, y) and its merged cells, each as first row, first column, last row, last
+column, counted from 0. A change of the clean-up that moves the page (a turn, unwarping,
+straightening) drops a person's areas; any other keeps them.
 
 **The same file and the same configuration give the same four files, byte for byte**, on the
 same version of optdoc: the pages are cleaned up from the plans, the text is made from the words
-stored (OCR, which is not always deterministic, does not run again), and the PDF carries no time
+stored (OCR, which is not always deterministic, does not run again), the tables from the areas
+stored (Camelot does not run again either), and the PDF carries no time
 and a file identifier made from the configuration. A page whose words are not stored yet (a
 configuration saved before that page was read) is read when the result is made. The tests check
 the bytes for `prepare`, `prepare --config` with the file and with the PDF, and `edit`.
@@ -202,7 +223,7 @@ the bytes for `prepare`, `prepare --config` with the file and with the PDF, and 
 ## Failures
 
 ```json
-{"interface": 2, "made_with": "optdoc 0.5.0", "error": "unsupported",
+{"interface": 2, "made_with": "optdoc 0.6.0", "error": "unsupported",
  "details": {"suffix": ".docx"},
  "message": {"en": "optdoc cannot open files of type .docx.",
              "de": "Dateien vom Typ .docx kann optdoc nicht öffnen."}}
@@ -239,13 +260,16 @@ The same kinds and wording are there for programs that use optdoc as a Python li
 ## The reading: `optdoc-reading`, version 1
 
 ```json
-{"format": "optdoc-reading", "version": 1, "made_with": "optdoc 0.5.0",
+{"format": "optdoc-reading", "version": 1, "made_with": "optdoc 0.6.0",
  "reader": "rapidocr", "source": "<file name>", "plan": {"1": {"…": "…"}},
  "pages": [{"page": 1, "width": 595.28, "height": 841.89, "source": "ocr",
             "text": "Kalium\t5,8\tmmol/l\t3,5 - 5,1\tH\n…", "markdown": "…",
             "words": [{"text": "Kalium", "start": 0, "end": 6,
                        "box": [56.2, 210.4, 89.9, 221.0], "confidence": 0.998, "by": "ocr"}],
-            "tables": [{"box": [56.2, 150.1, 536.0, 451.3], "confidence": 0.863,
+            "regions": [{"kind": "text", "box": [56.2, 40.0, 536.0, 140.0], "by": "person"},
+                        {"kind": "table", "box": [56.2, 150.1, 536.0, 451.3], "by": "auto",
+                         "table": 0}],
+            "tables": [{"box": [56.2, 150.1, 536.0, 451.3], "confidence": 0.863, "by": "auto",
                         "rows": [[{"text": "Kalium", "box": [56.2, 208.4, 226.2, 224.4]},
                                   {"text": "5,8", "box": [226.2, 208.4, 296.2, 224.4]},
                                   "…"]]}]}]}
@@ -259,11 +283,19 @@ wrote in the window (confidence 1). In the text, a line of the page is a line; o
 OCR, a gap wider than the words are high (between the cells of a table, or columns) is a tab.
 `plan` holds the plans of the pages that were cleaned up, as in the configuration.
 
-`tables` lists the tables of the page, top to bottom, each with its `box`, Camelot's `confidence`
-in it (0 to 1) and its `rows`, top to bottom, each a list of cells from left to right: `text`
-(spaces collapsed; empty for an empty cell or one another cell spans) and `box`, in the same
-points as the words. Every row is given once, even where Camelot found a table twice. `tables` is
-`[]` when the page has none and `null` when tables were not looked for.
+`regions` lists the areas of the page in reading order: `kind` (`text`, `table`, `image`,
+`barcode`, `handwriting`, `stamp`, `ignore`), `box`, `by` ("auto" or "person"), and for a table
+the number of its table in `tables`. A program that covers what a person marked (a pseudonymiser:
+handwriting, stamps, barcodes) takes the boxes from here.
+
+`tables` lists the tables of the page in the order of their areas (top to bottom as optdoc finds
+them), each with its `box`, the `confidence` of the automatic finding (0 to 1; 1 for a grid a
+person set), `by` ("auto" or "person") and its `rows`, top to bottom, each a list of cells from
+left to right: `text` (the words whose middle lies in the cell, lines joined by a space; empty
+for an empty cell or one covered by merged cells, of which the first holds the text and the box
+of all) and `box`, in the same points as the words. Every row is given once, even where Camelot
+found a table twice. `tables` is `[]` when the page has none and `null` when tables were neither
+looked for nor set by a person.
 
 ## The text layer
 

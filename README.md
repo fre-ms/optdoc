@@ -12,11 +12,13 @@ which pseudonymises patient documents, and medorello, a records app that files d
 values from them, such as the results printed on a photographed laboratory report. optdoc itself knows
 nothing about either and works on any kind of document.
 
-**Status: pre-alpha (0.5.0).** The code comes from PseudonyMed, where it has been tested for weeks, with its
+**Status: pre-alpha (0.6.0).** The code comes from PseudonyMed, where it has been tested for weeks, with its
 history. Since 0.1.0 its identifiers are English (`docs/renames-0.1.0.md` lists the old German names); since
 0.2.0 its command line is a described interface ([docs/interface.md](docs/interface.md)) and it can be built
 as a standalone program ([docs/sidecar.md](docs/sidecar.md)); since 0.4.0 it has a window to correct the
-clean-up and the text by hand, and a configuration from which a result can be made again, byte for byte.
+clean-up and the text by hand, and a configuration from which a result can be made again, byte for byte;
+since 0.6.0 a page is divided into areas (text, tables with their grid, pictures, barcodes, handwriting,
+stamps, areas not to be read), found automatically and corrected by hand, as in FineReader.
 `CHANGELOG.md` lists the changes.
 
 ## What it does today
@@ -36,17 +38,24 @@ clean-up and the text by hand, and a configuration from which a result can be ma
   ruled grids, which Tesseract's page segmentation tends to drop, are read a second time without their lines.
 - **Structures** the OCR text as Markdown: paragraphs re-joined, headings by size and weight, lists,
   tables from wide gaps.
-- **Finds tables with their cells** (extra `tables`, Camelot), in born-digital PDFs and, through its own
-  text layer, in scans and photos: a laboratory result comes out as a row of cells, name, value, unit,
-  range, flag. On invented laboratory reports in three layouts every one of 216 rows in born-digital PDFs
-  was cut and read right, and 211 of 216 in photos were cut right (193 read exactly).
+- **Divides a page into areas**: text, tables, pictures, barcodes, handwriting, stamps, and areas not to
+  be read; what lies in no area is text. Words in pictures, barcodes and areas not to be read stay out of
+  the text; handwriting and stamps are read and marked, so that a program such as a pseudonymiser can
+  cover them.
+- **Finds tables with their grid** (extra `tables`, Camelot), in born-digital PDFs and, through its own
+  text layer, in scans and photos, and puts every word into the cell of the grid it lies in: a laboratory
+  result comes out as a row of cells, name, value, unit, range, flag. On invented laboratory reports in
+  three layouts every one of 216 rows in born-digital PDFs was cut and read right, and 211 of 216 in photos
+  were cut right (196 read exactly).
 - **Writes** a searchable PDF (the cleaned-up pages with the recognised words laid invisibly over the printed
   ones, line by line, so that selecting a word in a reader covers it and a program that takes the text out
   gets a row of a table as one line; every character as read, "≤" and "↑" too), the reading as JSON, the
   text as Markdown, and the configuration.
 - **Lets a person correct it** in a window (extra `gui`, Qt): the clean-up of every page before and after,
-  each step switchable, the sheet's corners to drag, and the text read by OCR beside the page, uncertain words marked, to be corrected
-  by hand. A correction reaches the PDF's text layer, the reading and the Markdown. The work can be saved
+  each step switchable, the sheet's corners to drag; the areas of the page, to be drawn, moved, resized,
+  given another kind or deleted, and a table's grid, whose lines can be added, dragged and taken away and
+  whose cells can be merged and split; and the text read by OCR beside the page, uncertain words marked, to
+  be corrected by hand. A correction reaches the PDF's text layer, the reading and the Markdown. The work can be saved
   and taken up again later.
 - **Makes the same result again.** The configuration (`<name>.optdoc.json`, also inside the PDF) holds
   every setting, the clean-up of every page, the words OCR read and the person's corrections, and nothing
@@ -175,6 +184,9 @@ words one in German, `"en"` in English.
 
 ## Planned
 
+- Pictures, barcodes (read as well, QR and DataMatrix included), handwriting and stamps found
+  automatically, the reading order of text areas, and layout models (PP-DocLayout, a handwriting
+  detector) as an optional download, measured before they are offered.
 - Apple Vision as a reader on macOS, including its document recognition with table cells (macOS 26 and later).
 - Flattening curved pages (a book, a folded letter), finding the page in a photo more robustly, and
   turning an upside-down page in the automatic suggestion.

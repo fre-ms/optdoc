@@ -22,6 +22,7 @@ import pymupdf
 from optdoc import cleanup
 from optdoc import ocr as ocrlib
 from optdoc.errors import OptdocError
+from optdoc.layout import Region
 from optdoc.pagetext import PageText
 from optdoc.structure import Structure
 from optdoc.tables import Table
@@ -43,14 +44,17 @@ def suggestion_for(page: pymupdf.Page, photo: bool | None = None) -> cleanup.Cle
 @dataclass
 class PageReading:
     """One page as read: its text (with a box for every character), whether that text
-    came from OCR, the structure of an OCR text, and on an OCR page for every word
-    whether a person wrote it (corrected the OCR) rather than the engine."""
+    came from OCR, the structure of an OCR text, on an OCR page for every word whether
+    a person wrote it (corrected the OCR) rather than the engine, its regions
+    (:mod:`optdoc.layout`) and the tables its table regions make."""
 
     number: int
     text: PageText
     ocr: bool
     structure: Structure | None = None
     person: list[bool] | None = None
+    regions: list[Region] = field(default_factory=list)
+    tables: list[Table] = field(default_factory=list)
 
     @property
     def markdown(self) -> str:
@@ -61,10 +65,9 @@ class PageReading:
 @dataclass
 class Reading:
     """A read document: the cleaned-up document, the plan that was applied, the pages,
-    the OCR engine used (None without one), and the tables of its pages by page number
-    once :func:`optdoc.output.write` has looked for them (None until then, or when it
-    did not), and the configuration that makes it again (:mod:`optdoc.project`).  Call
-    :meth:`close` when done."""
+    the OCR engine used (None without one), the tables of its pages by page number (None
+    when they were not looked for), and the configuration that makes it again
+    (:mod:`optdoc.project`).  Call :meth:`close` when done."""
 
     source: Path
     doc: pymupdf.Document
@@ -96,6 +99,7 @@ def read(
     with_structure: bool = True,
     photo: bool | None = None,
     progress: Progress | None = None,
+    cells: bool = True,
 ) -> Reading:
     """Read a PDF or an image.
 
@@ -107,13 +111,15 @@ def read(
     every image-only page for a photo, False for a scan; None (the default) tells by each
     page.  ``with_structure`` gives OCR pages their structure.  ``progress`` is called
     with the number of the page about to be done (from 1) and the number of pages.
+    ``cells`` finds the tables with their cells (the extra "tables").
 
     Raises :class:`~optdoc.errors.OptdocError` (an :class:`~optdoc.errors.OCRError` for
     the engines); a plan that names a page the document does not have is a "bad-config"."""
     from optdoc.project import Options, Project
 
     options = Options(reader=reader, languages=languages, tables=tables, paper=paper,
-                      photo=photo, clean_up=clean_up, structure=with_structure, dpi=dpi)
+                      photo=photo, clean_up=clean_up, structure=with_structure, dpi=dpi,
+                      cells=cells)
     project = Project.open(path, options)
     try:
         if plan is not None:

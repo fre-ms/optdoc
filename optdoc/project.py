@@ -2,16 +2,18 @@
 
 A project holds everything that decides what optdoc makes of a file: the settings
 (engine, paper, the clean-up switches), the clean-up plan of every page, what OCR read
-on every page (its words with their boxes and confidences), and the text a person
-corrected.  Its configuration (``<name>.optdoc.json``, format ``optdoc-config``) is
+on every page (its words with their boxes and confidences), the regions of every page
+(text, tables with their grids, pictures …: :mod:`optdoc.layout`), and the text a
+person corrected.  Its configuration (``<name>.optdoc.json``, format ``optdoc-config``) is
 that, and nothing else: no paths, no times.  It serves three ends:
 
 - **Interrupting and resuming.**  The window (``optdoc edit``) saves the configuration
   and opens it again where the person stopped.
 - **Reproducing.**  The file and its configuration always give the same result,
   byte for byte: the clean-up is computed from the plan, and the text from the words
-  stored, so that OCR, which is not always deterministic, does not run again.  A page
-  whose words are not stored yet is read when the result is made.
+  stored, so that OCR, which is not always deterministic, does not run again; so are
+  the regions found automatically.  A page whose words or regions are not stored yet
+  is read, and its regions found, when the result is made.
 - **Improving on a result.**  The configuration also travels inside the PDF optdoc
   writes (an embedded file ``optdoc.json``); ``--config`` takes that PDF as well.
 
@@ -31,7 +33,7 @@ from typing import Any
 
 import pymupdf
 
-from optdoc import __version__, cleanup
+from optdoc import __version__, cleanup, layout, tables, textlayer
 from optdoc import ocr as ocrlib
 from optdoc.alignment import align_correction
 from optdoc.errors import OptdocError
@@ -45,6 +47,7 @@ from optdoc.reading import (
     suggestion_for,
 )
 from optdoc.structure import analyse_page_structure
+from optdoc.tables import Table
 
 FORMAT = "optdoc-config"
 FORMAT_VERSION = 1
@@ -57,7 +60,8 @@ class Options:
     """The settings that decide the result: OCR engine and its language packs,
     Tesseract's second pass for table grids, the paper an image is placed on, photo or
     scan (None: told by each page), the automatic clean-up, the structure of OCR text,
-    and the resolution pages are cleaned up and read at."""
+    the resolution pages are cleaned up and read at, and whether tables are found with
+    their cells automatically (``cells``; a person can set them all the same)."""
 
     reader: str = "auto"
     languages: str | None = None
@@ -67,6 +71,7 @@ class Options:
     clean_up: bool = True
     structure: bool = True
     dpi: int = ocrlib.OCR_DPI
+    cells: bool = True
 
     def as_dict(self) -> dict[str, Any]:
         """The settings for the configuration."""
@@ -81,7 +86,7 @@ class Options:
         kinds: dict[str, tuple[type, ...]] = {
             "reader": (str,), "languages": (str, type(None)), "tables": (bool,),
             "paper": (str,), "photo": (bool, type(None)), "clean_up": (bool,),
-            "structure": (bool,), "dpi": (int,)}
+            "structure": (bool,), "dpi": (int,), "cells": (bool,)}
         for name, value in d.items():
             if name not in kinds:
                 continue
@@ -98,13 +103,16 @@ class Options:
 class _Page:
     """The state of one page: its plan once decided (None: no clean-up), what OCR read
     on the cleaned page (None: not read yet; ``ocr`` False: the page has a text layer
-    and needs none), and the person's correction of the OCR text."""
+    and needs none), its regions (None: not found yet) and whether a person set them,
+    and the person's correction of the OCR text."""
 
     decided: bool = False
     plan: cleanup.CleanupPlan | None = None
     ocr: bool | None = None
     words: list[ocrlib.OCRWord] | None = None
     correction: str | None = None
+    regions: list[layout.Region] | None = None
+    regions_by_person: bool = False
     suggestion: cleanup.CleanupPlan | None = field(default=None, repr=False)
 
 
@@ -113,6 +121,15 @@ def _plan_key(plan: cleanup.CleanupPlan | None) -> str:
     if plan is None or not plan.active:
         return ""
     return json.dumps(plan.full_dict(), sort_keys=True)
+
+
+def _geometry_key(plan: cleanup.CleanupPlan | None) -> str:
+    """What of a plan moves things on the page (turning, unwarping, straightening): the
+    regions a person set stay where the rest of a plan changes."""
+    if plan is None:
+        return json.dumps([0, False, False])
+    return json.dumps([plan.rotation, plan.unwarp and plan.corners,
+                       plan.straighten and plan.angle])
 
 
 def _copy(plan: cleanup.CleanupPlan | None) -> cleanup.CleanupPlan | None:
@@ -243,11 +260,18 @@ class Project:
             if correction is not None and not isinstance(correction, str):
                 raise OptdocError("bad-config", reason="field")
             page.correction = correction
+            found = entry.get("layout")
+            if found is not None:
+                if not isinstance(found, dict) or found.get("by") not in layout.BY:
+                    raise OptdocError("bad-config", reason="field")
+                page.regions = layout.regions_from_dicts(found.get("regions"))
+                page.regions_by_person = found["by"] == "person"
 
     def config(self) -> dict[str, Any]:
         """The configuration: settings, and per page the plan (resolved: the suggestion
         where none was decided; kept also where it does nothing, for the corners it
-        found), what OCR read, and the correction."""
+        found), what OCR read, the regions (found or set; None while not found), and the
+        correction."""
         pages = []
         for n, page in enumerate(self.pages):
             plan = self.plan(n)
@@ -257,6 +281,9 @@ class Project:
                 "ocr": page.ocr,
                 "words": None if page.words is None else [
                     [w.text, w.x0, w.y0, w.x1, w.y1, w.confidence] for w in page.words],
+                "layout": None if page.regions is None else {
+                    "by": "person" if page.regions_by_person else "auto",
+                    "regions": [r.as_dict() for r in page.regions]},
                 "correction": page.correction,
             })
         return {
@@ -325,10 +352,15 @@ class Project:
         on the new words."""
         page = self.pages[n]
         changed = _plan_key(plan) != _plan_key(self.plan(n))
+        moved = _geometry_key(plan) != _geometry_key(self.plan(n))
         page.decided = True
         page.plan = _copy(plan)
         if changed:
             page.words, page.ocr = None, None
+            # found regions are found again on the new words; a person's stay where
+            # nothing moved on the page
+            if not page.regions_by_person or moved:
+                page.regions, page.regions_by_person = None, False
 
     def _image(self, n: int) -> tuple[bytes, float, float] | None:
         """The cleaned-up image of a page and the size of its page (computed once per
@@ -425,14 +457,19 @@ class Project:
                 progress(n + 1, len(self.pages))
             self.read(n)
 
-    def ocr_text(self, n: int) -> PageText | None:
-        """What OCR read on the page, as a page text; None for a page not read by OCR."""
+    def ocr_text(self, n: int, every_word: bool = False) -> PageText | None:
+        """What OCR read on the page, as a page text, without the words in regions that
+        are not read (pictures, barcodes, "ignore"), unless ``every_word``; None for a
+        page not read by OCR."""
         page = self.pages[n]
         if not page.ocr or page.words is None:
             return None
+        words = page.words
+        if not every_word and page.regions:
+            words = [w for w in words
+                     if layout.is_read(page.regions, (w.x0, w.y0, w.x1, w.y1))]
         cleaned = self._cleaned(n)
-        return ocrlib.page_text_from_words(page.words, n, cleaned.rect.width,
-                                           cleaned.rect.height)
+        return ocrlib.page_text_from_words(words, n, cleaned.rect.width, cleaned.rect.height)
 
     def text(self, n: int) -> str:
         """The text of a page as it will be: the correction, else what OCR read, else the
@@ -453,6 +490,69 @@ class Project:
             raise OptdocError("not-ocr", page=n + 1)
         self.pages[n].correction = None if text.rstrip() == ocr.text.rstrip() else text
 
+    # -- the regions ---------------------------------------------------------------------------
+    def finds_tables(self) -> bool:
+        """True when tables are found automatically (the setting, and Camelot there)."""
+        return self.options.cells and tables.available()
+
+    def regions(self, n: int) -> list[layout.Region]:
+        """The regions of a page (copies): as a person set them, else as found (once; the
+        page is read first)."""
+        page = self.pages[n]
+        if page.regions is None:
+            page.regions = self.find_regions(n)
+            page.regions_by_person = False
+        return [layout.copy(r) for r in page.regions]
+
+    def has_regions(self, n: int) -> bool:
+        """True when the regions of the page are known (found or set): no work to wait for."""
+        return self.pages[n].regions is not None
+
+    def forget_regions(self, n: int) -> None:
+        """Forget the regions of a page, a person's too: they are found again."""
+        self.pages[n].regions, self.pages[n].regions_by_person = None, False
+
+    def regions_by_person(self, n: int) -> bool:
+        """True when a person set the regions of the page."""
+        return self.pages[n].regions_by_person
+
+    def set_regions(self, n: int, regions: list[layout.Region]) -> None:
+        """A person's regions for a page; raises "bad-config" (reason "field") for a
+        region that makes no sense."""
+        if not all(r.valid() for r in regions):
+            raise OptdocError("bad-config", reason="field")
+        page = self.pages[n]
+        page.regions = [layout.rounded(r) for r in regions]
+        page.regions_by_person = True
+
+    def leave_out_found_tables(self) -> None:
+        """Find no tables from now on, and forget those found (a person's stay)."""
+        self.options.cells = False
+        for page in self.pages:
+            if not page.regions_by_person:
+                page.regions = None
+
+    def find_regions(self, n: int) -> list[layout.Region]:
+        """The regions optdoc finds on a page (read first): its tables with their grids
+        (Camelot on the page with its text, as the PDF will carry it); none where tables
+        are not found automatically or finding them failed."""
+        self.read(n)
+        if not self.finds_tables():
+            return []
+        self._cleaned(n)  # the work page shows the current plan (or the page as it came)
+        single = pymupdf.open()
+        try:
+            single.insert_pdf(self._work, from_page=n, to_page=n)
+            text = self.ocr_text(n, every_word=True)
+            if text is not None:
+                textlayer.write_page(single, single[0], text, textlayer.add_font(single))
+            found = tables.find_tables(single.tobytes())
+        except Exception:  # Camelot's own failure on an unusual page: no regions
+            return []
+        finally:
+            single.close()
+        return [layout.rounded(layout.from_table(t)) for t in found.get(0, [])]
+
     # -- the result ----------------------------------------------------------------------------
     def build(self, progress: Progress | None = None) -> Reading:
         """The result: every page read (where not yet), cleaned up by its plan, its text
@@ -466,27 +566,60 @@ class Project:
             image = self._image(n)
             if image is not None:
                 cleanup.put_page_image(doc, n, *image)
+        for n in range(len(self.pages)):
+            self.regions(n)  # found where not yet, so that the configuration holds them
         pages = [self._page_reading(doc, n) for n in range(len(self.pages))]
         plans = {n: p for n in range(len(self.pages)) if (p := self.active_plan(n)) is not None}
+        found: dict[int, list[Table]] | None = {s.number: s.tables for s in pages}
+        if not self.finds_tables() and not any(s.tables for s in pages):
+            found = None  # not looked for
         return Reading(self.source, doc, plans, pages, self.reader_name(),
-                       config=self.config())
+                       tables=found, config=self.config())
 
     def _page_reading(self, doc: pymupdf.Document, n: int) -> PageReading:
-        """One page of the result."""
+        """One page of the result: its text, and the tables of its table regions made
+        from the words of that text (corrected where a person did)."""
+        regions = self.regions(n)
         ocr = self.ocr_text(n)
         if ocr is None:
-            return PageReading(n, read_text_layer(doc[n], n), False)
-        structure = analyse_page_structure(doc[n], ocr) if self.options.structure else None
+            text = read_text_layer(doc[n], n)
+            return PageReading(n, text, False, regions=regions,
+                               tables=_tables(regions, text))
         correction = self.pages[n].correction
-        if correction is None:
-            return PageReading(n, ocr, True, structure, [False] * len(ocr.words()))
-        text, person = align_correction(correction, ocr)
-        return PageReading(n, text, True, structure, person)
+        text, person = (ocr, [False] * len(ocr.words())) if correction is None \
+            else align_correction(correction, ocr)
+        found = _tables(regions, text)
+        structure = None
+        if self.options.structure:
+            structure = analyse_page_structure(doc[n], ocr)
+            structure.use_tables(ocr, [(r.box, [[c.text for c in row] for row in t.rows])
+                                       for r, t in zip([r for r in regions if r.kind == "table"],
+                                                       found, strict=True)])
+        return PageReading(n, text, True, structure, person, regions=regions, tables=found)
 
     @property
     def corrected(self) -> list[int]:
         """The pages a person corrected (from 0)."""
         return [n for n, p in enumerate(self.pages) if p.correction is not None]
+
+
+def _words_of(text: PageText) -> list[layout.Word]:
+    """The words of a page text with their boxes (the union of their characters')."""
+    words: list[layout.Word] = []
+    for a, b in text.words():
+        boxes = text.rects(a, b)
+        if boxes:
+            box = boxes[0]
+            for r in boxes[1:]:
+                box |= r
+            words.append((text.text[a:b], (box.x0, box.y0, box.x1, box.y1)))
+    return words
+
+
+def _tables(regions: list[layout.Region], text: PageText) -> list[Table]:
+    """The tables the table regions of a page make of its text, in their order."""
+    words = _words_of(text)
+    return [layout.table_of(r, words) for r in regions if r.kind == "table"]
 
 
 def config_bytes(config: dict[str, Any]) -> bytes:

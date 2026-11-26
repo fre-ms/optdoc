@@ -36,7 +36,6 @@ from __future__ import annotations
 import difflib
 import json
 import re
-import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -217,13 +216,8 @@ def rows_of(page_text: PageText) -> list[str]:
     return [" ".join(t for _, t in sorted(row, key=lambda w: w[0].x0)) for row, _ in rows]
 
 
-def _cell_texts(path: Path, reading: Any) -> list[list[list[str]]]:
-    """The tables of a reading as rows of cell texts; the searchable PDF they are found in
-    is written into a hidden folder inside the document's own folder and removed."""
-    from optdoc import output
-
-    with tempfile.TemporaryDirectory(prefix=".optdoc-bench-", dir=path.parent) as work:
-        output.write(reading, work, stem="document")
+def _cell_texts(reading: Any) -> list[list[list[str]]]:
+    """The tables of a reading as rows of cell texts."""
     found = reading.tables or {}
     return [[[c.text for c in row] for row in t.rows] for page in found.values() for t in page]
 
@@ -248,7 +242,7 @@ def _read_lines(path: Path, reader: str, clean_up: bool, cells: Path | None = No
                    "cleaned_up": len(reading.plan)}
         if cells is not None and tables.available():
             truth = json.loads(cells.read_text(encoding="utf-8"))
-            found = score_tables(truth, _cell_texts(path, reading))
+            found = score_tables(truth, _cell_texts(reading))
             confidence.table_rows = found.table_rows
             confidence.table_rows_cut_right = found.table_rows_cut_right
             confidence.table_rows_exact = found.table_rows_exact

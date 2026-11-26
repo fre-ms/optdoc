@@ -1,5 +1,5 @@
-"""The window of ``optdoc edit``: the pages on the left, clean-up and text as two tabs,
-and three ways out.
+"""The window of ``optdoc edit``: the pages on the left, clean-up, areas and text as
+three tabs, in FineReader's order, and three ways out.
 
 - **Apply** reads every page not read yet (with progress) and closes; the command line
   then writes the result, exactly as ``prepare`` would from the same configuration.
@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 
 from optdoc.errors import describe_error
 from optdoc.gui.cleanup_panel import CleanupPanel
+from optdoc.gui.regions_panel import RegionsPanel
 from optdoc.gui.text_panel import TextPanel
 from optdoc.gui.words import Words
 from optdoc.gui.worker import Worker
@@ -59,6 +60,8 @@ class EditWindow(QMainWindow):
         self.resize(1280, 820)
         self.cleanup = CleanupPanel(project, words)
         self.cleanup.changed.connect(self._plan_changed)
+        self.areas = RegionsPanel(project, words, self._find_regions)
+        self.areas.changed.connect(self._plan_changed)
         self.text = TextPanel(project, words, self._read_page)
         central = QWidget()
         v = QVBoxLayout(central)
@@ -68,6 +71,7 @@ class EditWindow(QMainWindow):
         splitter.addWidget(self.pages)
         self.tabs = QTabWidget()
         self.tabs.addTab(self.cleanup, self.w("tab_cleanup"))
+        self.tabs.addTab(self.areas, self.w("tab_regions"))
         self.tabs.addTab(self.text, self.w("tab_text"))
         splitter.addWidget(self.tabs)
         splitter.setSizes([140, 1140])
@@ -121,6 +125,8 @@ class EditWindow(QMainWindow):
         self._mark_pages()
         if self.tabs.currentWidget() is self.text:
             self.text.show_page(n)
+        elif self.tabs.currentWidget() is self.areas:
+            self.areas.show_page(n)
         else:
             self.cleanup.show_page(n)
 
@@ -133,7 +139,7 @@ class EditWindow(QMainWindow):
                 item.setText(self.w(key, number=n + 1))
 
     def _plan_changed(self, _n: int) -> None:
-        """A plan changed: the page will be read again."""
+        """A plan or the areas of a page changed."""
         self.changed = True
 
     # -- work off the window's thread ----------------------------------------------------------
@@ -143,6 +149,7 @@ class EditWindow(QMainWindow):
             self._pending = (job, then)
             return
         self.cleanup.setEnabled(False)
+        self.areas.setEnabled(False)
         for button in (self.later_button, self.apply_button):
             button.setEnabled(False)
         self._worker = Worker(job, self, inline=self.synchronous)
@@ -167,6 +174,7 @@ class EditWindow(QMainWindow):
         """Nothing runs any more; start what waited."""
         self._worker = None
         self.cleanup.setEnabled(True)
+        self.areas.setEnabled(True)
         for button in (self.later_button, self.apply_button):
             button.setEnabled(True)
         if self._pending is not None:
@@ -183,6 +191,16 @@ class EditWindow(QMainWindow):
             then()
 
         self._run(lambda: self.project.read(n), done)
+
+    def _find_regions(self, n: int, then: Callable[[], None]) -> None:
+        """Read page ``n`` and find its areas (for the areas panel), then call back."""
+        self.status.setText(self.w("finding_regions", number=n + 1))
+
+        def done() -> None:
+            self.status.setText("")
+            then()
+
+        self._run(lambda: self.project.regions(n), done)
 
     def _progress(self, n: int, total: int) -> None:
         """Progress of reading every page."""
@@ -232,9 +250,10 @@ class EditWindow(QMainWindow):
     # -- the self-test of the standalone program ------------------------------------------------
     def self_test(self) -> None:
         """Go through the window once without a person: show the clean-up of the first
-        page, turn to its text, and apply."""
+        page, its areas, turn to its text, and apply."""
         self.tabs.setCurrentWidget(self.cleanup)
         self.cleanup.show_page(0)
+        self.tabs.setCurrentWidget(self.areas)
         self.tabs.setCurrentWidget(self.text)
         self.text.commit()
         self.apply()

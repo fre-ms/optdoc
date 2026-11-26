@@ -23,7 +23,7 @@ from typing import Any
 
 import pymupdf
 
-from optdoc import __version__, tables, textlayer
+from optdoc import __version__, textlayer
 from optdoc.errors import OptdocError
 from optdoc.pagetext import PageText
 from optdoc.project import EMBEDDED, SUFFIX, config_bytes
@@ -66,6 +66,19 @@ def _words(page_text: PageText, person: list[bool] | None = None) -> list[dict[s
     return words
 
 
+def _regions(s: PageReading) -> list[dict[str, Any]]:
+    """The regions of a page for the reading, in reading order: kind, box, who set it,
+    and for a table the number of its table in the page's ``tables``."""
+    regions, table = [], 0
+    for r in s.regions:
+        d: dict[str, Any] = {"kind": r.kind, "box": [round(v, 2) for v in r.box], "by": r.by}
+        if r.kind == "table":
+            d["table"] = table
+            table += 1
+        regions.append(d)
+    return regions
+
+
 def _page_as_dict(s: PageReading, tables: list[Table] | None) -> dict[str, Any]:
     """One page of the reading; ``tables`` None when they were not looked for."""
     return {
@@ -76,6 +89,7 @@ def _page_as_dict(s: PageReading, tables: list[Table] | None) -> dict[str, Any]:
         "text": s.text.text,
         "markdown": s.markdown,
         "words": _words(s.text, s.person),
+        "regions": _regions(s),
         "tables": [t.as_dict() for t in tables] if tables is not None else None,
     }
 
@@ -142,14 +156,10 @@ def searchable_pdf(reading: Reading) -> bytes:
         duplicate.close()
 
 
-def write(reading: Reading, folder: str | Path, stem: str | None = None,
-          cells: bool = True) -> dict[str, Path]:
+def write(reading: Reading, folder: str | Path, stem: str | None = None) -> dict[str, Path]:
     """Write ``<stem>.pdf``, ``<stem>.reading.json``, ``<stem>.md`` and the
     configuration ``<stem>.optdoc.json`` (where the reading has one) into ``folder``
-    (created when missing); returns the paths.
-    With ``cells`` (and the extra "tables") the tables of the PDF written are looked
-    for and go into the reading with their cells (:mod:`optdoc.tables`); a failure
-    there leaves them out.  Nothing is written anywhere else.  Raises
+    (created when missing); returns the paths.  Nothing is written anywhere else.  Raises
     :class:`~optdoc.errors.OptdocError`: "same-as-source" when the PDF would replace the
     document that was read, "unwritable" when the folder cannot take the files."""
     target = Path(folder)
@@ -168,7 +178,6 @@ def write(reading: Reading, folder: str | Path, stem: str | None = None,
         paths["pdf"].write_bytes(pdf)
     except OSError as e:
         raise OptdocError("unwritable") from e
-    reading.tables = _tables_of(paths["pdf"]) if cells else None
     contents = {
         "reading": json.dumps(reading_as_dict(reading), ensure_ascii=False,
                               indent=1).encode("utf-8"),
@@ -184,14 +193,3 @@ def write(reading: Reading, folder: str | Path, stem: str | None = None,
     except OSError as e:
         raise OptdocError("unwritable") from e
     return paths
-
-
-def _tables_of(pdf: Path) -> dict[int, list[Table]] | None:
-    """The tables of the PDF written, or None without Camelot or when it failed: tables
-    are a help to the reading, never a reason for it to fail."""
-    if not tables.available():
-        return None
-    try:
-        return tables.find_tables(pdf)
-    except Exception:  # Camelot's own failure on an unusual page
-        return None

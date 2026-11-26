@@ -181,3 +181,78 @@ def test_corners_dragged_and_turned(app: QApplication, tmp_path: Path, report: P
         window.outcome = "cancelled"
         window.close()
         project.close()
+
+
+def _click(view, x: float, y: float, drag_to: tuple[float, float] | None = None) -> None:
+    """A click (or a drag) with the mouse at page points ``(x, y)`` of a view."""
+    from PySide6.QtCore import QPointF
+    from PySide6.QtTest import QTest
+
+    def at(px: float, py: float):
+        return view.mapFromScene(QPointF(px * view.scale_factor, py * view.scale_factor))
+
+    QTest.mousePress(view.viewport(), Qt.MouseButton.LeftButton, pos=at(x, y))
+    if drag_to is not None:
+        QTest.mouseMove(view.viewport(), at((x + drag_to[0]) / 2, (y + drag_to[1]) / 2))
+        QTest.mouseMove(view.viewport(), at(*drag_to))
+    QTest.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton,
+                       pos=at(*(drag_to or (x, y))))
+
+
+@pytest.mark.skipif(not __import__("optdoc.tables").tables.available(),
+                    reason="needs Camelot (extra 'tables')")
+def test_areas_by_mouse(app: QApplication, tmp_path: Path) -> None:
+    """The areas tab shows the table optdoc found; with the mouse a person adds a column
+    line and takes it away, merges two cells, drags a line, draws a picture and makes it a
+    stamp,
+    deletes the table; each change is in the project at once; finding again brings
+    optdoc's table back."""
+    from optdoc.project import Options
+    from tests.synthetic import lab_report
+
+    pdf, _ = lab_report(tmp_path, 1)
+    project = Project.open(pdf, Options(reader="none"))
+    window = EditWindow(project, Words("en"), synchronous=True)
+    window.resize(1300, 900)
+    window.show()
+    try:
+        window.tabs.setCurrentWidget(window.areas)
+        panel, view = window.areas, window.areas.view
+        assert [r.kind for r in view.regions] == ["table"]
+        table = view.regions[0]
+        x0, y0, x1, y1 = table.box
+        _click(view, x0 + 5, y0 + 5)
+        assert view.selected == 0
+        panel.use_tool("column")
+        middle_of_first = (x0 + table.columns[0]) / 2
+        _click(view, middle_of_first, (y0 + y1) / 2)
+        assert len(project.regions(0)[0].columns) == len(table.columns) + 1
+        assert project.regions_by_person(0)
+        panel.use_tool("remove")
+        _click(view, middle_of_first, (y0 + y1) / 2)
+        assert project.regions(0)[0].columns == pytest.approx(table.columns)
+        panel.use_tool("merge")
+        row_middle = (table.rows[1] + table.rows[2]) / 2
+        _click(view, x0 + 3, row_middle, drag_to=((table.columns[0] + table.columns[1]) / 2,
+                                                  row_middle))
+        assert project.regions(0)[0].merged == [(2, 0, 2, 1)]
+        panel.use_tool("select")  # the table is still selected: drag its last column line
+        last, bottom_row = table.columns[-1], (table.rows[-1] + y1) / 2
+        _click(view, last, bottom_row, drag_to=(last + 12, bottom_row))
+        assert project.regions(0)[0].columns[-1] == pytest.approx(last + 12, abs=1.5)
+        panel.draw("image")
+        _click(view, 400, 760, drag_to=(520, 800))
+        assert [r.kind for r in project.regions(0)] == ["table", "image"]
+        panel.kinds.setCurrentIndex(panel.kinds.findData("stamp"))  # the picture drawn: a stamp
+        assert [r.kind for r in project.regions(0)] == ["table", "stamp"]
+        panel.use_tool("select")
+        _click(view, x0 + 5, y0 + 5)
+        view.delete_selected()
+        assert [r.kind for r in project.regions(0)] == ["stamp"] and window.changed
+        panel.find_again()
+        assert [r.kind for r in project.regions(0)] == ["table"]
+        assert not project.regions_by_person(0)
+    finally:
+        window.outcome = "cancelled"
+        window.close()
+        project.close()
