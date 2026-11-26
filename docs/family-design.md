@@ -98,6 +98,17 @@ set, text they corrected), and what a machine found is found again (OCR reads th
 anew). Where the frame changed, the page's decisions no longer fit and go, and the answer
 says which (`dropped`). This rule is the same in every tool and in the window.
 
+**Every step is optional** (the user, 26 November 2026: OCR must be possible without
+preparation, and the other way round, and so with every tool). A step that is not in use
+for a document hands on what it got, untouched; the chain document says for every step
+whether it was in use (`docrepro-chain` version 2), so that the same original and document
+give the same files whatever is installed later. A step that is switched off keeps its
+configuration document, for what a person decided in it. What a step cannot do without
+another it declares (semdoc needs ocrdoc's reading), and a step that gets what it cannot
+take says so itself: ocrdoc reads PDFs, and a photo becomes one through optdoc alone. The
+window shows the steps beside the tabs, each with a switch and what became of it: off, in
+use as suggested, changed by hand, to be made anew.
+
 ### What "the same" means
 
 The guarantee holds for the same version of a tool (`made_with`). A new version may make a
@@ -143,6 +154,38 @@ Python, character by character, and its tests let the reference library read it 
 belongs to filing (the record, the versions, who filed it, where it came from) stays the
 records app's.
 
+**attdoc, the signing step** (step 50, the last; named by the user, see "Decided") puts a
+document beyond later change: a time stamp, and a person's signature.
+It differs from every step before it, and the differences are part of its contract:
+
+- **It rests on TimeAttest**, as tagdoc rests on medRDS: TimeAttest signs PDFs (PAdES),
+  gathers and renews time stamps, verifies, and holds the signers (a software certificate,
+  a token, the electronic health professional card). The step calls it; it writes no
+  cryptography of its own. TimeAttest runs on Java, so the step is optional in the
+  standalone program too.
+- **Two kinds of personal signature** (the user): the qualified one with the health
+  professional card, and an advanced one with a software certificate. The step names which
+  kind a document got, and never calls the second "qualified".
+- **It cannot be made again, only verified.** A time stamp and a card's signature differ
+  every time. So for this step "reproduce" means: make the steps before it again, byte for
+  byte, and check that the signature covers exactly those bytes. Its configuration
+  document records what was signed (the SHA-256), how, by which certificate, with which
+  time-stamp service, and the outcome of the verification.
+- **It goes on the network for a time stamp**, on request, as `models fetch` does for a
+  model: one more door in the network lock, open for that request alone. Only the hash of
+  the document leaves the computer, never the document. An application that runs docrepro
+  with the network closed runs this step outside that fence.
+- **It never runs unasked.** A signature is a declaration of a person's will: the step is
+  off unless a person switches it on for a document, in the window or on the command line,
+  and a qualified signature needs the person's PIN at the card reader each time.
+- **Nothing after it changes the file.** tagdoc already writes into a sidecar where a PDF is
+  signed (medRDS 7.5). A records app that files a signed PDF does the same, or files first
+  and signs afterwards; which of the two is to be decided with the records app. A PDF
+  carries its signature inside; any other file gets it beside (a signature container, an
+  evidence record), as TimeAttest does.
+- **Time stamps gathered over many files** (one qualified stamp for a batch) are
+  TimeAttest's work on a whole record, not this step's on one document.
+
 **The core, doccor,** holds what all tools share: the configuration document (head, SHA-256, frame,
 rounding, embedding in a PDF, the deterministic file identifier), the command line's
 manners (exactly one JSON answer, kinds of error with messages in English and German,
@@ -162,6 +205,42 @@ brings the adapters of optdoc and ocrdoc, and any other step brings its own thro
 entry-point group `docrepro.steps` (tagdoc does) (an adapter opens the step's project on its input, gives
 its configuration document, writes its result and names the pages whose decisions went).
 A chain document that names a step which is not installed is refused (`step-missing`).
+
+## The file keeps its type
+
+docrepro is not "pdfrepro" (the user, 27 November 2026): no step may force a file type.
+PDF is the rule, since it holds pages, text, a description and a signature in one file;
+it is not a condition. The contract, for every tool:
+
+**A step takes the file as it comes and leaves its type as it is. What the format has a
+place for, the step writes into the file; everything else it lays beside it. Only typdoc
+changes the type.**
+
+Where things go is the standard's to say, and medRDS says it already (7.4 for metadata in
+each format, 7.5 for sidecars, 6.4 for text drawn from a file):
+
+| step | a PDF | a picture |
+|---|---|---|
+| **typdoc** (order 5, optional) | nothing to do | binds pictures into one PDF as medRDS 9.5 says: a JPEG is the image of its page byte for byte, a picture of another format is attached to its page and shown as a JPEG, the page is turned as the picture's orientation says |
+| optdoc | the prepared pages, in the PDF | the prepared picture, in the format it came in |
+| ocrdoc | the text layer in the PDF; the reading and Markdown beside | the picture untouched; the reading and Markdown beside |
+| semdoc | annotations beside | annotations beside |
+| tagdoc | XMP and the information dictionary | JPEG and PNG: XMP in the file; other formats: a sidecar `<file name>.xmp` |
+| attdoc | the signature in the PDF | the signature and the evidence beside |
+
+typdoc is on for pictures unless a person switches it off, so that PDF stays the rule; with
+it off, a picture stays a picture through every step. optdoc takes what it is handed:
+typdoc's PDF, or the original. Several pictures of one document are bound by typdoc, or
+stay several documents.
+
+What follows for the tools as they are (0.8 / 0.2 / 0.1 / docrepro 0.3): optdoc makes a
+PDF of every picture today, on a sheet of paper, and must write back the type it got (the
+sheet of paper is typdoc's); ocrdoc reads PDFs only and must read pictures, its reading
+saying whether a box is in points or in pixels; tagdoc needs the ways into JPEG and PNG;
+docrepro hands on "the PDF" and must hand on "the document", with the chain document
+beside a picture instead of inside it. Order of work: typdoc, optdoc, ocrdoc, tagdoc,
+docrepro; each stage takes one restriction away. To be measured before it is promised:
+whether a HEIC picture can be written again byte for byte.
 
 ## The command lines
 
@@ -277,3 +356,21 @@ Each stage is released and tested before the next; each keeps the chain reproduc
 - tagdoc uses the standard (the user, the same night): writing a document's metadata, vCards
   in XMP among them, stays in medRDS's reference library for the apps that file; tagdoc writes
   the descriptive part of chapter 7 in Python, as the library does.
+- Every step is optional, and the window says which are in use (the user, the same night):
+  a list of the steps beside the tabs, each with a switch and its state, and a sign on the
+  tabs (built in docrepro 0.3.0).
+- A signing step is to come, as the last (the user, the same night): time stamps and
+  personal signatures, the qualified one with the health professional card and an advanced
+  one with a software certificate, resting on TimeAttest. It is named **attdoc** (the user,
+  27 November 2026). The user's first thought, sigdoc, is taken (PyPI, .org, .com, the
+  ACM's SIGDOC); of some eighty candidates around attest, verify, seal and proof, attdoc
+  and attestdoc passed domains, package names, web search and the DPMAregister, and
+  TMview as far as it answered (nothing containing either name); stpdoc ("stamp") passed
+  as well and reads as "step", and stamps are areas in ocrdoc. Not yet read: the classes
+  of the EU word mark ATTEST and of "Attestierer" (EU and DE, 2026), and the US register.
+- No step forces a file type (the user, 27 November 2026; "The file keeps its type"
+  above). The step that changes the type is **typdoc** (the user's name: it changes the
+  document's type; before it, chgdoc, which in SAP's world means a change log). Every
+  domain, PyPI, npm and GitHub are free and the DPMAregister has no such mark; its one
+  neighbour is TypeDoc, the documentation generator for TypeScript. TMview and the US
+  register are still to be asked.
