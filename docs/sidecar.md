@@ -13,7 +13,7 @@ On the computer the program is for (PyInstaller does not cross-build), from a ch
 the application pins:
 
 ```
-uv sync --extra ocr --extra tables --extra gui --group build
+uv sync --extra ocr --extra tables --extra gui --extra barcodes --group build
 uv run python packaging/build.py
 ```
 

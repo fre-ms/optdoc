@@ -196,3 +196,35 @@ def test_a_persons_grid_is_certain() -> None:
     assert layout.table_of(found, []).confidence == 0.7
     changed = layout.move_line(found, 1, 0, 110)
     assert changed.by == "person" and layout.table_of(changed, []).confidence == 1.0
+
+
+@needs_tables
+def test_finding_tables_writes_nothing_elsewhere(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                               ) -> None:
+    """Camelot writes a PDF it is given in memory to the temporary folder; optdoc gives it
+    a path in the results folder, for a moment.  Nothing touches the temporary folder,
+    not even briefly, and nothing is left in the results folder but the results."""
+    import tempfile
+
+    def refused(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("nothing may go to the temporary folder")
+
+    for name in ("mkstemp", "mkdtemp", "NamedTemporaryFile", "TemporaryFile",
+                 "TemporaryDirectory", "SpooledTemporaryFile"):
+        monkeypatch.setattr(tempfile, name, refused)
+    pdf, _ = lab_report(tmp_path, 1)
+    out = tmp_path / "out"
+    project = Project.open(pdf, Options(reader="none"))
+    project.scratch = out
+    try:
+        assert [r.kind for r in project.regions(0)] == ["table"]
+        assert not out.exists()  # made for the moment, and taken away again
+        reading = project.build()
+        try:
+            output.write(reading, out)
+        finally:
+            reading.close()
+    finally:
+        project.close()
+    assert sorted(p.name for p in out.iterdir()) == sorted(
+        ["lab-01.pdf", "lab-01.reading.json", "lab-01.md", f"lab-01{SUFFIX}"])

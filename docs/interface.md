@@ -44,14 +44,15 @@ Every answer has these two fields:
 ```json
 {"interface": 2, "made_with": "optdoc 0.6.0", "version": "0.6.0",
  "readers": ["rapidocr", "tesseract"], "clean_up": true, "heic": true, "tables": true,
- "window": true}
+ "window": true, "barcodes": true}
 ```
 
 `readers` lists the OCR engines found, in order of preference (`rapidocr` comes inside the
 standalone program; `tesseract` is listed where the system has it). `clean_up` says whether the
 clean-up steps are there (OpenCV), `heic` whether HEIC and HEIF photos can be opened, `tables`
 whether tables are found with their cells (Camelot, the extra "tables"), `window` whether
-`edit` can open its window (PySide6, the extra "gui"). The engines are not loaded for this, so the
+`edit` can open its window (PySide6, the extra "gui"), `barcodes` whether barcodes are found and
+read (zxing-cpp, the extra "barcodes"). The engines are not loaded for this, so the
 answer is quick (0.25 s for the standalone program as a folder, 3.7 s as one file, which unpacks
 itself first).
 
@@ -61,7 +62,7 @@ itself first).
 optdoc prepare <file> --out <folder> [--config <file.optdoc.json | file.pdf>]
     [--reader auto|rapidocr|tesseract|none] [--languages <packs>]
     [--paper a4|a5|a3|letter|legal|image] [--photo | --scan]
-    [--no-clean-up] [--no-tables] [--no-structure] [--no-cells] [--progress]
+    [--no-clean-up] [--no-tables] [--no-structure] [--no-cells] [--no-areas] [--progress]
 ```
 
 `<file>` is a PDF or an image (JPEG, PNG, TIFF, BMP, GIF, WebP, PNM, HEIC, HEIF). optdoc never
@@ -81,7 +82,7 @@ file.
 With `--config`, optdoc starts from a configuration instead of its suggestions: a
 `<stem>.optdoc.json`, or a PDF optdoc wrote, which carries its configuration. The configuration
 then decides every setting; `--reader`, `--languages`, `--paper`, `--photo`, `--scan`,
-`--no-clean-up`, `--no-tables` and `--no-structure` beside it are a `usage` error.
+`--no-clean-up`, `--no-tables`, `--no-structure` and `--no-areas` beside it are a `usage` error.
 
 The answer:
 
@@ -113,6 +114,18 @@ not to be read stay out of the text, the text layer and the reading; handwriting
 read and marked, so that a program can treat them apart. What lies in no area is read as text.
 `--no-cells` finds no tables (about 4 s less for the standalone program as one file, 0.7 s as a
 folder); beside `--config` it also leaves out the tables found before, but not a person's.
+
+optdoc also finds barcodes (and reads them: QR, DataMatrix, PDF417, Code 128, EAN and more; the
+extra "barcodes"), pictures, stamps and handwriting, on the page where it lies once cleaned up but
+in its own colours. A stamp is told by its colour (one strong hue, lines and letters), so not on
+a scan in grey; handwriting by ink of the height of writing in which OCR read hardly a word.
+Since a picture keeps its words out of the text, a picture needs a clear case (filled or in many
+tones, hardly a word read in it). Measured on six invented letters, each with a logo, a picture,
+a stamp, two pieces of handwriting and three or four barcodes, born digital / scanned in colour /
+scanned in grey / photographed: pictures 12 / 12 / 10 / 12 of 12 (wrong ones: 0 / 0 / 0 / 2),
+barcodes 17 / 17 / 17 / 15 of 17 with their content, stamps 6 / 5 / 0 / 5 of 6, handwriting
+11 / 11 / 9 / 10 of 12 (wrong ones: 0 / 0 / 0 / 1); on laboratory reports, nothing besides
+their tables (the numbers read stayed the same). `--no-areas` finds none of these.
 
 **Photos and scans.** A page without text is cleaned up by the configuration given, else by
 optdoc's suggestion. The suggestion tells a photographed page from a scanned one by the page
@@ -188,7 +201,7 @@ caller waits until it is closed. It keeps no settings of its own and writes noth
 {"format": "optdoc-config", "version": 1, "made_with": "optdoc 0.6.0",
  "source": {"sha256": "…", "bytes": 245678, "suffix": ".jpg"},
  "options": {"reader": "auto", "languages": null, "tables": true, "paper": "a4", "photo": null,
-             "clean_up": true, "structure": true, "dpi": 300, "cells": true},
+             "clean_up": true, "structure": true, "dpi": 300, "cells": true, "areas": true},
  "reader": "rapidocr",
  "pages": [{"page": 1, "plan": {"rotation": 0, "straighten": true, "angle": 2.1, "…": "…"},
             "ocr": true, "words": [["Kalium", 56.2, 210.4, 89.9, 221.0, 0.998], "…"],
@@ -284,8 +297,9 @@ OCR, a gap wider than the words are high (between the cells of a table, or colum
 `plan` holds the plans of the pages that were cleaned up, as in the configuration.
 
 `regions` lists the areas of the page in reading order: `kind` (`text`, `table`, `image`,
-`barcode`, `handwriting`, `stamp`, `ignore`), `box`, `by` ("auto" or "person"), and for a table
-the number of its table in `tables`. A program that covers what a person marked (a pseudonymiser:
+`barcode`, `handwriting`, `stamp`, `ignore`), `box`, `by` ("auto" or "person"), for a table the
+number of its table in `tables`, and for a barcode optdoc read its `format` (as zxing-cpp names
+it: "QRCode", "DataMatrix", "Code128", "EAN13" …) and its `content`. A program that covers what a person marked (a pseudonymiser:
 handwriting, stamps, barcodes) takes the boxes from here.
 
 `tables` lists the tables of the page in the order of their areas (top to bottom as optdoc finds

@@ -100,6 +100,7 @@ def read(
     photo: bool | None = None,
     progress: Progress | None = None,
     cells: bool = True,
+    scratch: Path | None = None,
 ) -> Reading:
     """Read a PDF or an image.
 
@@ -111,7 +112,9 @@ def read(
     every image-only page for a photo, False for a scan; None (the default) tells by each
     page.  ``with_structure`` gives OCR pages their structure.  ``progress`` is called
     with the number of the page about to be done (from 1) and the number of pages.
-    ``cells`` finds the tables with their cells (the extra "tables").
+    ``cells`` finds the tables with their cells (the extra "tables"); ``scratch`` is a
+    folder where a page may be written for a moment for that (a hidden folder in it is
+    removed at once), else a private temporary folder.
 
     Raises :class:`~optdoc.errors.OptdocError` (an :class:`~optdoc.errors.OCRError` for
     the engines); a plan that names a page the document does not have is a "bad-config"."""
@@ -121,6 +124,7 @@ def read(
                       photo=photo, clean_up=clean_up, structure=with_structure, dpi=dpi,
                       cells=cells)
     project = Project.open(path, options)
+    project.scratch = scratch
     try:
         if plan is not None:
             if any(not 0 <= n < len(project.pages) for n in plan):

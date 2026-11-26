@@ -393,6 +393,8 @@ class RegionsView(PageView):
         region.kind, region.by, region.confidence = kind, "person", None
         if kind != "table":
             region.columns, region.rows, region.merged = [], [], []
+        if kind != "barcode":
+            region.format = region.content = None
         self.regions[self.selected] = region
         self._draw()
         self.regions_changed.emit([layout.copy(r) for r in self.regions])

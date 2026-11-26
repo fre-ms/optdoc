@@ -229,7 +229,8 @@ def _read_lines(path: Path, reader: str, clean_up: bool, cells: Path | None = No
     from optdoc import tables
     from optdoc.reading import read
 
-    reading = read(path, reader=reader, clean_up=clean_up)
+    # a page is written for a moment only into the document's own folder, never elsewhere
+    reading = read(path, reader=reader, clean_up=clean_up, scratch=path.parent)
     try:
         lines: list[str] = []
         confidence = Score()

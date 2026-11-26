@@ -158,6 +158,9 @@ class RegionsPanel(QWidget):
         if k is not None and regions[k].kind == "table":
             rows, columns = regions[k].size
             lines.append(self.w("regions_table", rows=rows, columns=columns))
+        elif k is not None and regions[k].kind == "barcode" and regions[k].format:
+            lines.append(self.w("regions_barcode", format=regions[k].format,
+                                content=regions[k].content or ""))
         if not self.project.finds_tables():
             lines.append(self.w("regions_no_tables"))
         self.note.setText("\n".join(lines))

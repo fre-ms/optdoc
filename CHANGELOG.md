@@ -3,9 +3,10 @@
 ## 0.6.0 (2026-11-26)
 
 Areas, as in FineReader: a page is divided into regions, found automatically and corrected by
-hand, and a table's grid can be set. The first of several steps: tables are found automatically;
-pictures, barcodes, handwriting and stamps are set by hand for now. Interface 2 and the formats
-of the configuration and the reading (version 1) gain fields; nothing is taken away.
+hand, and a table's grid can be set. Tables, barcodes (read as well), pictures, stamps and
+handwriting are found automatically; the reading order of text areas and layout models as an
+optional download are to come. Interface 2 and the formats of the configuration and the reading
+(version 1) gain fields; nothing is taken away.
 
 ### Added
 
@@ -21,7 +22,20 @@ of the configuration and the reading (version 1) gain fields; nothing is taken a
   split them by a click; find the areas again.
 - The configuration keeps every page's areas (`layout`, with `by`) and the setting `cells`; the
   reading lists every page's `regions` and says of each table who set it (`by`).
-- `Project.regions`, `set_regions`, `find_regions`, `forget_regions`; `read(..., cells=...)`.
+- **Barcodes, pictures, stamps and handwriting found** (`optdoc.areas`), on the page where it lies
+  once cleaned up but in its own colours: barcodes with zxing-cpp (the extra `barcodes`), read as
+  well (format and content in the reading; a line barcode's box grown over its bars); stamps by one
+  strong colour with lines of letters; pictures by filled or many-toned ink with hardly a word
+  read in it (a picture keeps its words out of the text, so it needs a clear case); handwriting
+  by ink of the height of writing in which OCR read hardly a word. Measured on six invented
+  letters (`bench/area_letters.py`), born digital / scanned in colour / in grey / photographed:
+  pictures 12 / 12 / 10 / 12 of 12, barcodes 17 / 17 / 17 / 15 of 17 with their content, stamps
+  6 / 5 / 0 / 5 of 6, handwriting 11 / 11 / 9 / 10 of 12, wrong ones at most 2 pictures and 1
+  handwriting (on the photos); on laboratory reports nothing besides their tables, the numbers
+  read unchanged. `--no-areas` (`Options.areas`) finds none of them; `readers` says whether
+  barcodes can be read (`barcodes`).
+- `Project.regions`, `set_regions`, `find_regions`, `find_tables`, `forget_regions`;
+  `read(..., cells=..., scratch=...)`; `cleanup.geometry_only`.
 
 ### Changed
 
@@ -34,6 +48,16 @@ of the configuration and the reading (version 1) gain fields; nothing is taken a
 - `--no-cells` is a setting of the configuration; beside `--config` it leaves out the tables
   found before, but not those a person set.
 - A table a person changed counts as certain (`confidence` 1).
+- **The suggestion straightens a tilt from 0.3 degrees** (was 1.2). Invented laboratory reports
+  scanned half a degree to a degree askew lost the grid of their tables (0 to 36 of 108 rows cut
+  right); straightened, 101 to 108, while the numbers read stayed within a few of 306 either way.
+
+### Fixed
+
+- Tables on scans: Camelot's table of texts can have fewer rows or columns than its grid of
+  cells, and optdoc stopped at that (since 0.3.0), so that many a scanned page had no tables.
+- Camelot is given a page only as a file in a folder of optdoc's own inside the results folder,
+  removed at once: given a PDF in memory, it writes it to the temporary folder.
 
 ### Removed
 

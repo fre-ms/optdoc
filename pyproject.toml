@@ -32,6 +32,10 @@ tables = [
 gui = [
     "pyside6-essentials>=6.8",
 ]
+# finds and reads barcodes (QR, DataMatrix, PDF417, Code 128, EAN …) as areas of a page
+barcodes = [
+    "zxing-cpp>=2.3",
+]
 
 [project.scripts]
 optdoc = "optdoc.cli:main"

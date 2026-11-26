@@ -46,7 +46,8 @@ def test_readers(capsys: pytest.CaptureFixture[str]) -> None:
     """What an installation can do, under the names medorello reads."""
     status, answer, _ = _answer(capsys, ["readers"])
     assert status == 0
-    assert set(answer) == HEAD | {"version", "readers", "clean_up", "heic", "tables", "window"}
+    assert set(answer) == HEAD | {"version", "readers", "clean_up", "heic", "tables", "window",
+                                  "barcodes"}
     assert answer["interface"] == INTERFACE and answer["version"] == __version__
     assert answer["made_with"] == f"optdoc {__version__}"
     assert set(answer["readers"]) <= {"rapidocr", "tesseract"}

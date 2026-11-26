@@ -75,6 +75,8 @@ def _regions(s: PageReading) -> list[dict[str, Any]]:
         if r.kind == "table":
             d["table"] = table
             table += 1
+        if r.kind == "barcode" and r.format is not None:
+            d["format"], d["content"] = r.format, r.content
         regions.append(d)
     return regions
 

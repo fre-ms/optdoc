@@ -140,6 +140,8 @@ WORDS: dict[str, tuple[str, str]] = {  # key: (English, German)
     "regions_person": ("Areas set by hand: {count}", "Von Hand gesetzte Bereiche: {count}"),
     "regions_table": ("Table selected: {rows} rows, {columns} columns",
                       "Ausgewählte Tabelle: {rows} Zeilen, {columns} Spalten"),
+    "regions_barcode": ("Barcode selected ({format}): {content}",
+                        "Ausgewählter Barcode ({format}): {content}"),
     "regions_no_tables": ("Tables are not found automatically here (extra 'tables' or "
                           "--no-cells); they can be drawn.",
                           "Tabellen werden hier nicht automatisch erkannt (Extra „tables“ oder "

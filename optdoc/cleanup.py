@@ -624,6 +624,9 @@ def native_dpi(page: pymupdf.Page) -> float | None:
     return best
 
 
+STRAIGHTEN_FROM = 0.3  # degrees of tilt the suggestion straightens (see suggest)
+
+
 def suggest(image: Any, photo: bool | None = None, scale: float = 1.0,
               resolution: float | None = None) -> CleanupPlan:
     """Automatic suggestion for one page: straighten a visible tilt, unwarp a
@@ -641,9 +644,11 @@ def suggest(image: Any, photo: bool | None = None, scale: float = 1.0,
     basis = apply_plan(image, CleanupPlan(unwarp=a.unwarp, corners=a.corners), scale) \
         if a.unwarp else image
     a.angle = estimate_tilt(basis)
-    # OCR engines tolerate a slight tilt, and rotating a noisy scan costs a little;
-    # straighten only what the eye notices
-    a.straighten = abs(a.angle) >= 1.2
+    # tables need straight rows and columns: on invented laboratory reports scanned at a
+    # tilt of 0.35 degrees, 36 of 108 rows were cut right, at 0.5 to 1 degree 0 to 36;
+    # straightened, 101 to 108, while the numbers read stayed within a few of 306 either
+    # way (better at 1 degree, a little worse at 0.5); below 0.3 degrees all is well
+    a.straighten = abs(a.angle) >= STRAIGHTEN_FROM
     a.upscale = 2 if resolution is not None and resolution < 150 else 1
     a.letter_mode = False  # measured: no gain over plain enlargement, so an explicit choice
     a.background = bool(photo) or a.unwarp or uneven_background(basis)
@@ -1036,6 +1041,15 @@ def _image_only(op: Callable[[Any], Any]) -> Step:
 def _with_strength(op: Callable[[Any, int], Any], switch: str) -> Step:
     """An operation on the image at the strength the plan holds in ``switch``."""
     return lambda image, a, scale: op(image, getattr(a, switch))
+
+
+def geometry_only(a: CleanupPlan) -> CleanupPlan:
+    """What of a plan moves the page (turning, unwarping, straightening), and nothing
+    else: the page where everything on it lies once cleaned up, in its own colours (the
+    areas of a page are looked for in it, :mod:`optdoc.areas`)."""
+    return CleanupPlan(rotation=a.rotation, unwarp=a.unwarp,
+                       corners=None if a.corners is None else list(a.corners),
+                       straighten=a.straighten, angle=a.angle)
 
 
 def turn_points(points: list[Corner], rotation: int, size: tuple[float, float]) -> list[Corner]:

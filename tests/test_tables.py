@@ -120,3 +120,24 @@ def test_each_row_once() -> None:
     both = Table([*grid.rows, *second], 0.79)
     found = tables._distinct([both, grid])
     assert found == [grid, Table(second, 0.79)]
+
+
+@needs_backend
+def test_a_slightly_tilted_scan_keeps_its_table(tmp_path: Path) -> None:
+    """A report scanned half a degree askew: straightened by the suggestion, its table
+    keeps its grid (unstraightened, Camelot cut no row right)."""
+    from optdoc.project import Options, Project
+    from tests.synthetic import scan
+
+    pdf, _ = lab_report(tmp_path, 2)
+    project = Project.open(scan(pdf, tmp_path / "scan.pdf", rotation=0.5), Options(areas=False))
+    try:
+        assert project.plan(0).straighten
+        reading = project.build()
+        try:
+            score = score_tables(_cells(pdf), _texts(reading.tables or {}))
+        finally:
+            reading.close()
+    finally:
+        project.close()
+    assert score.table_rows_cut_right >= 16, score

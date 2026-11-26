@@ -30,10 +30,11 @@ The five rows Camelot missed on the photos were all cut right; OCR had read "U/l
 reports (all three layouts, two sets of values) 211 of 216 rows cut right and 193 read
 exactly; on the born-digital PDFs of 24 reports every row (432).
 
-Needs the extra "tables".  Camelot is given the PDF of a page in memory (the project
-finds the tables of a page before anything is written, :mod:`optdoc.layout`); Camelot
-2.2 renders pages in memory and writes no file anywhere (checked with an empty
-temporary folder).
+Needs the extra "tables".  Camelot is given the path of a PDF: for a path, Camelot 2.2
+renders pages in memory and writes no file anywhere else (checked with an empty
+temporary folder); a PDF in memory it would write to the temporary folder first.  The
+project writes the page it looks at into a folder of its own for a moment
+(:meth:`optdoc.project.Project.find_regions`).
 """
 
 from __future__ import annotations
@@ -105,8 +106,14 @@ def _table(found: Any, page: pymupdf.Page) -> Table | None:
     texts = found.df.values.tolist()
     if len(found.cells) < 2 or len(found.cells[0]) < 2:
         return None
-    rows = [[Cell(" ".join(str(texts[r][c]).split()), _shown(page, cell.x1, cell.y1, cell.x2,
-                                                             cell.y2))
+
+    def text(r: int, c: int) -> str:
+        # Camelot's table of texts may have fewer rows or columns than its grid of
+        # cells (on scans it often has); a cell without text is empty
+        return " ".join(str(texts[r][c]).split()) if r < len(texts) and c < len(texts[r]) \
+            else ""
+
+    rows = [[Cell(text(r, c), _shown(page, cell.x1, cell.y1, cell.x2, cell.y2))
              for c, cell in enumerate(row)]
             for r, row in enumerate(found.cells)]
     return Table(rows, float(getattr(found, "confidence", 0.0) or 0.0))
@@ -146,18 +153,17 @@ def _distinct(tables: list[Table]) -> list[Table]:
     return sorted(kept, key=lambda t: t.box[1])
 
 
-def find_tables(pdf: str | Path | bytes) -> dict[int, list[Table]]:
-    """The tables of every page of a PDF (a path, or its bytes) by page number (from 0),
-    top to bottom, each once; a page without tables is not named.  Needs Camelot."""
+def find_tables(pdf: str | Path) -> dict[int, list[Table]]:
+    """The tables of every page of the PDF at ``pdf`` by page number (from 0), top to
+    bottom, each once; a page without tables is not named.  Needs Camelot.  Only a path:
+    Camelot writes a PDF given in memory to the temporary folder."""
     import camelot
 
     with warnings.catch_warnings():  # "no tables found" on a page is no news
         warnings.simplefilter("ignore")
-        found = camelot.read_pdf(pdf if isinstance(pdf, bytes) else str(pdf), pages="all",
-                                 flavor="hybrid")
+        found = camelot.read_pdf(str(pdf), pages="all", flavor="hybrid")
     tables: dict[int, list[Table]] = {}
-    opened = pymupdf.open("pdf", pdf) if isinstance(pdf, bytes) else pymupdf.open(pdf)
-    with opened as doc:
+    with pymupdf.open(pdf) as doc:
         for each in found:
             number = int(each.page) - 1
             table = _table(each, doc[number])

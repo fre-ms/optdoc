@@ -1,6 +1,6 @@
 """Build optdoc as one executable file and try it out.
 
-    uv sync --extra ocr --extra tables --extra gui --group build
+    uv sync --extra ocr --extra tables --extra gui --extra barcodes --group build
     uv run python packaging/build.py [--identity "Developer ID Application: …"] [--no-check]
 
 writes ``dist/optdoc-<target>`` (the name Tauri expects of a sidecar, ``<target>`` being
@@ -69,14 +69,14 @@ def build(name: str, identity: str | None, onedir: bool = False) -> Path:
 
 def licences() -> list[dict[str, str]]:
     """The Python distributions the program carries (optdoc with the extras "ocr",
-    "tables" and "gui" and what they need), each with its version and licence as its
-    metadata states it."""
+    "tables", "gui" and "barcodes" and what they need), each with its version and licence
+    as its metadata states it."""
     from importlib import metadata
 
     from packaging.requirements import Requirement
 
     found: dict[str, dict[str, str]] = {}
-    queue = [("optdoc", {"ocr", "tables", "gui"})]
+    queue = [("optdoc", {"ocr", "tables", "gui", "barcodes"})]
     while queue:
         name, extras = queue.pop()
         key = name.lower().replace("_", "-")
@@ -116,8 +116,8 @@ def check(program: Path) -> dict[str, object]:
     checks: dict[str, str] = {}
     status, answer, _, timings["readers"] = _run([str(program), "readers"])
     assert status == 0 and "rapidocr" in answer["readers"], answer
-    assert answer["clean_up"] and answer["heic"] and answer["tables"] and answer["window"], \
-        answer
+    assert answer["clean_up"] and answer["heic"] and answer["tables"] and answer["window"] \
+        and answer["barcodes"], answer
     assert answer["interface"] >= 2, answer
     checks["readers"] = f"{answer['made_with']}, readers {answer['readers']}"
     with tempfile.TemporaryDirectory() as folder:

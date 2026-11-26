@@ -24,16 +24,21 @@ through :meth:`Project.build`, so that there is one way from a configuration to 
 
 from __future__ import annotations
 
+import contextlib
 import functools
+import gc
 import hashlib
 import json
+import shutil
+import tempfile
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import pymupdf
 
-from optdoc import __version__, cleanup, layout, tables, textlayer
+from optdoc import __version__, areas, cleanup, layout, tables, textlayer
 from optdoc import ocr as ocrlib
 from optdoc.alignment import align_correction
 from optdoc.errors import OptdocError
@@ -60,8 +65,9 @@ class Options:
     """The settings that decide the result: OCR engine and its language packs,
     Tesseract's second pass for table grids, the paper an image is placed on, photo or
     scan (None: told by each page), the automatic clean-up, the structure of OCR text,
-    the resolution pages are cleaned up and read at, and whether tables are found with
-    their cells automatically (``cells``; a person can set them all the same)."""
+    the resolution pages are cleaned up and read at, whether tables are found with
+    their cells automatically (``cells``), and whether barcodes, stamps, pictures and
+    handwriting are (``areas``); a person can set every area all the same."""
 
     reader: str = "auto"
     languages: str | None = None
@@ -72,6 +78,7 @@ class Options:
     structure: bool = True
     dpi: int = ocrlib.OCR_DPI
     cells: bool = True
+    areas: bool = True
 
     def as_dict(self) -> dict[str, Any]:
         """The settings for the configuration."""
@@ -86,7 +93,7 @@ class Options:
         kinds: dict[str, tuple[type, ...]] = {
             "reader": (str,), "languages": (str, type(None)), "tables": (bool,),
             "paper": (str,), "photo": (bool, type(None)), "clean_up": (bool,),
-            "structure": (bool,), "dpi": (int,), "cells": (bool,)}
+            "structure": (bool,), "dpi": (int,), "cells": (bool,), "areas": (bool,)}
         for name, value in d.items():
             if name not in kinds:
                 continue
@@ -207,6 +214,33 @@ class Project:
         self._engine: ocrlib.OCRBackend | None = None
         self._engine_made = False
         self._stored_reader: str | None = None
+        self.scratch: Path | None = None  # where a page may be written for a moment
+
+    @contextlib.contextmanager
+    def _working_folder(self) -> Iterator[Path]:
+        """A folder for a moment's file (Camelot reads a PDF only from a path, and writes
+        any other input to the temporary folder): inside the results folder (``scratch``)
+        where the project has one, so that nothing of a document lands anywhere else; it
+        is removed at once, and the results folder too when it was made for it and stays
+        empty.  Without one (optdoc used as a library), a private temporary folder."""
+        if self.scratch is None:
+            with tempfile.TemporaryDirectory(prefix="optdoc-") as folder:
+                yield Path(folder)
+            return
+        made = not self.scratch.exists()
+        work = self.scratch / ".optdoc-work"
+        try:
+            work.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            raise OptdocError("unwritable") from e
+        try:
+            yield work
+        finally:
+            gc.collect()  # Camelot holds the file open until its objects are collected
+            shutil.rmtree(work, ignore_errors=True)
+            if made:
+                with contextlib.suppress(OSError):
+                    self.scratch.rmdir()  # only when nothing else is in it
 
     # -- opening and saving --------------------------------------------------------------------
     @classmethod
@@ -533,10 +567,52 @@ class Project:
                 page.regions = None
 
     def find_regions(self, n: int) -> list[layout.Region]:
-        """The regions optdoc finds on a page (read first): its tables with their grids
-        (Camelot on the page with its text, as the PDF will carry it); none where tables
-        are not found automatically or finding them failed."""
+        """The regions optdoc finds on a page (read first), in reading order (top to
+        bottom, then left to right): its tables with their grids (:meth:`find_tables`),
+        and its barcodes, stamps, pictures and handwriting (:mod:`optdoc.areas`), as the
+        settings ask for them."""
         self.read(n)
+        found = self.find_tables(n)
+        if self.options.areas and cleanup.available():
+            found += self._find_marks(n, [r.box for r in found])
+        return sorted(found, key=lambda r: (round(r.box[1]), r.box[0]))
+
+    def _find_marks(self, n: int, taken: list[layout.Box]) -> list[layout.Region]:
+        """Barcodes, stamps, pictures and handwriting on the page, outside ``taken``:
+        looked for on the page where it will lie once cleaned up, but in its own colours
+        (the clean-up may take the colour of a stamp away, or turn the page grey)."""
+        plan = self.active_plan(n)
+        if plan is not None:
+            png, width, _height = cleanup.cleaned_image(
+                self.original[n], cleanup.geometry_only(plan), self.options.dpi)
+            import cv2
+            import numpy as np
+
+            decoded = cv2.imdecode(np.frombuffer(png, np.uint8), cv2.IMREAD_COLOR)
+            if decoded is None:
+                raise OptdocError("clean-up-failed")
+            image, scale = decoded, decoded.shape[1] / width
+        else:
+            image, scale = cleanup.render(self.original[n], self.options.dpi)
+        codes = [layout.rounded(r) for r in areas.find_barcodes(image, scale)]
+        words = self._area_words(n)
+        marks = areas.find_marks(image, scale, words, [*taken, *(c.box for c in codes)])
+        return codes + [layout.rounded(r) for r in marks]
+
+    def _area_words(self, n: int) -> list[areas.Word] | None:
+        """The words read on a page, every one (with their confidence), for the finders;
+        None where nothing was read."""
+        page = self.pages[n]
+        if page.ocr and page.words is not None:
+            return [areas.Word(w.text, (w.x0, w.y0, w.x1, w.y1), w.confidence)
+                    for w in page.words]
+        text = read_text_layer(self._cleaned(n), n)
+        return [areas.Word(t, box) for t, box in _words_of(text)] or None
+
+    def find_tables(self, n: int) -> list[layout.Region]:
+        """The tables of a page with their grids: Camelot on the page with its text, as
+        the PDF will carry it; none where tables are not found automatically or finding
+        them failed."""
         if not self.finds_tables():
             return []
         self._cleaned(n)  # the work page shows the current plan (or the page as it came)
@@ -546,7 +622,12 @@ class Project:
             text = self.ocr_text(n, every_word=True)
             if text is not None:
                 textlayer.write_page(single, single[0], text, textlayer.add_font(single))
-            found = tables.find_tables(single.tobytes())
+            with self._working_folder() as folder:
+                page = folder / "page.pdf"
+                single.save(page)
+                found = tables.find_tables(page)
+        except OptdocError:
+            raise
         except Exception:  # Camelot's own failure on an unusual page: no regions
             return []
         finally:

@@ -56,6 +56,8 @@ class Region:
     rows: list[float] = field(default_factory=list)
     merged: list[Span] = field(default_factory=list)
     confidence: float | None = None  # how sure the automatic finder was (0 to 1)
+    format: str | None = None  # a barcode's format, as zxing-cpp names it ("QRCode" …)
+    content: str | None = None  # what a barcode says
 
     # -- the grid ------------------------------------------------------------------------------
     @property
@@ -105,6 +107,8 @@ class Region:
             d["merged"] = [list(span) for span in self.merged]
         if self.confidence is not None:
             d["confidence"] = round(self.confidence, 3)
+        if self.kind == "barcode" and self.format is not None:
+            d["format"], d["content"] = self.format, self.content
         return d
 
     @classmethod
@@ -118,7 +122,8 @@ class Region:
                          rows=[float(v) for v in d.get("rows", [])],
                          merged=[tuple(int(v) for v in span) for span in d.get("merged", [])],  # type: ignore[misc]
                          confidence=(None if d.get("confidence") is None
-                                     else float(d["confidence"])))
+                                     else float(d["confidence"])),
+                         format=d.get("format"), content=d.get("content"))
         except (KeyError, TypeError, ValueError) as e:
             raise OptdocError("bad-config", reason="field") from e
         if not region.valid():
@@ -129,6 +134,10 @@ class Region:
         """True when the region is of a known kind and its box and grid make sense."""
         x0, y0, x1, y1 = self.box
         if self.kind not in KINDS or self.by not in BY or len(self.box) != 4:
+            return False
+        if self.kind != "barcode" and (self.format is not None or self.content is not None):
+            return False
+        if not all(v is None or isinstance(v, str) for v in (self.format, self.content)):
             return False
         if x1 - x0 < SMALLEST or y1 - y0 < SMALLEST:
             return False
@@ -155,7 +164,8 @@ class Region:
 def copy(region: Region) -> Region:
     """An independent copy of a region."""
     return Region(region.kind, tuple(region.box), region.by, list(region.columns),  # type: ignore[arg-type]
-                  list(region.rows), list(region.merged), region.confidence)
+                  list(region.rows), list(region.merged), region.confidence, region.format,
+                  region.content)
 
 
 def rounded(region: Region) -> Region:
@@ -164,7 +174,8 @@ def rounded(region: Region) -> Region:
     return Region(region.kind, tuple(round(v, 3) for v in region.box),  # type: ignore[arg-type]
                   region.by, [round(v, 3) for v in region.columns],
                   [round(v, 3) for v in region.rows], list(region.merged),
-                  None if region.confidence is None else round(region.confidence, 3))
+                  None if region.confidence is None else round(region.confidence, 3),
+                  region.format, region.content)
 
 
 # -- what the regions make of the words ---------------------------------------------------------

@@ -41,7 +41,8 @@ stamps, areas not to be read), found automatically and corrected by hand, as in 
 - **Divides a page into areas**: text, tables, pictures, barcodes, handwriting, stamps, and areas not to
   be read; what lies in no area is text. Words in pictures, barcodes and areas not to be read stay out of
   the text; handwriting and stamps are read and marked, so that a program such as a pseudonymiser can
-  cover them.
+  cover them. Barcodes are found and read (QR, DataMatrix, Code 128, EAN …; extra `barcodes`), pictures,
+  stamps (by their colour) and handwriting found by measured rules.
 - **Finds tables with their grid** (extra `tables`, Camelot), in born-digital PDFs and, through its own
   text layer, in scans and photos, and puts every word into the cell of the grid it lies in: a laboratory
   result comes out as a row of cells, name, value, unit, range, flag. On invented laboratory reports in
@@ -63,8 +64,9 @@ stamps, areas not to be read), found automatically and corrected by hand, as in 
   byte.
 
 Decisions in the clean-up are measured, not guessed: binarising a page (Sauvola) looked good and made
-RapidOCR nearly blind, so optdoc does not do it; straightening a noisy scan by less than about one degree
-costs more than it gains, so the suggestion leaves it alone; neural unwarping (UVDoc) bent the tables of
+RapidOCR nearly blind, so optdoc does not do it; a scan tilted by as little as half a degree lost the
+grid of its tables (0 to 36 of 108 rows cut right), so the suggestion straightens from 0.3 degrees on
+(101 to 108 rows, the numbers read as well as before within a few); neural unwarping (UVDoc) bent the tables of
 photographed laboratory reports, while a sheet unwarped by its corners in its true proportions read as well
 as with the true corners (1525 and 1522 of 1530 numbers on 30 invented photos). The tests guard the
 first two and the unwarping at a slant.
@@ -76,7 +78,7 @@ Python 3.12 or later, with [uv](https://docs.astral.sh/uv/):
 ```
 git clone https://github.com/fre-ms/optdoc
 cd optdoc
-uv sync --extra ocr --extra tables --extra gui
+uv sync --extra ocr --extra tables --extra gui --extra barcodes
 ```
 
 The `ocr` extra brings RapidOCR, ONNX Runtime, OpenCV and NumPy (for the clean-up steps) and HEIC support;
@@ -184,9 +186,8 @@ words one in German, `"en"` in English.
 
 ## Planned
 
-- Pictures, barcodes (read as well, QR and DataMatrix included), handwriting and stamps found
-  automatically, the reading order of text areas, and layout models (PP-DocLayout, a handwriting
-  detector) as an optional download, measured before they are offered.
+- The reading order of text areas, and layout models (PP-DocLayout, a handwriting detector) as an
+  optional download, measured against the heuristics before they are offered.
 - Apple Vision as a reader on macOS, including its document recognition with table cells (macOS 26 and later).
 - Flattening curved pages (a book, a folded letter), finding the page in a photo more robustly, and
   turning an upside-down page in the automatic suggestion.

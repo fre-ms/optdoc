@@ -60,6 +60,48 @@ def _lab_reports() -> ModuleType:
     return module
 
 
+def area_letter(folder: Path, number: int = 1) -> tuple[Path, list[dict]]:
+    """The bench's invented letter ``number`` with a logo, a picture, a stamp, handwriting
+    and barcodes (``bench/area_letters.py``), and its areas as drawn."""
+    import json
+
+    spec = importlib.util.spec_from_file_location(
+        "area_letters", Path(__file__).resolve().parents[1] / "bench" / "area_letters.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    pdf = module.make(folder, number)[number - 1]
+    return pdf, json.loads(pdf.with_name(pdf.stem + ".areas.json").read_text(encoding="utf-8"))
+
+
+def colour_scan(source: Path, target: Path, dpi: int = 200, rotation: float = 1.0,
+                seed: int = 1) -> Path:
+    """An image-only PDF of a page scanned in colour: turned a little, with grain and a
+    few specks, stored as JPEG.  Needs OpenCV and NumPy."""
+    import cv2
+    import numpy as np
+
+    with pymupdf.open(source) as d:
+        pix = d[0].get_pixmap(dpi=dpi, alpha=False)
+        width, height = d[0].rect.width, d[0].rect.height
+    image = np.frombuffer(pix.samples, np.uint8).reshape(pix.height, pix.width, 3)[:, :, ::-1]
+    turn = cv2.getRotationMatrix2D((pix.width / 2, pix.height / 2), rotation, 1.0)
+    image = cv2.warpAffine(np.ascontiguousarray(image), turn, (pix.width, pix.height),
+                           borderValue=(255, 255, 255))
+    rng = np.random.default_rng(seed)
+    image = np.clip(image.astype(np.float32) + rng.normal(0, 4, image.shape), 0, 255)
+    image = image.astype(np.uint8)
+    image[rng.random(image.shape[:2]) < 0.003] = 0
+    ok, jpeg = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    assert ok
+    doc = pymupdf.open()
+    page = doc.new_page(width=width, height=height)
+    page.insert_image(page.rect, stream=bytes(jpeg))
+    doc.save(target)
+    doc.close()
+    return target
+
+
 def lab_report(folder: Path, number: int = 1) -> tuple[Path, list[str]]:
     """The bench's invented laboratory report ``number`` (1: a ruled grid, 2: open columns,
     3: two blocks with a flag column) as a PDF, and its truth lines, one per result."""

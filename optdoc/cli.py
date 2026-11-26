@@ -27,7 +27,7 @@ from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 from typing import Any, NoReturn, TextIO
 
-from optdoc import __version__, cleanup, offline, tables
+from optdoc import __version__, areas, cleanup, offline, tables
 from optdoc import ocr as ocrlib
 from optdoc.errors import LANGUAGES, OptdocError
 from optdoc.project import SUFFIX, Options, Project, load_config
@@ -48,7 +48,7 @@ def _readers(args: argparse.Namespace) -> dict[str, Any]:
 
     return {"version": __version__, "readers": ocrlib.available_backends(),
             "clean_up": cleanup.available(), "heic": _heic(), "tables": tables.available(),
-            "window": gui.available()}
+            "window": gui.available(), "barcodes": areas.barcodes_available()}
 
 
 def _progress(page: int, of: int) -> None:
@@ -59,7 +59,7 @@ def _progress(page: int, of: int) -> None:
 
 # the options that decide the result; with --config the configuration decides them
 _SETTINGS = ("reader", "languages", "paper", "photo", "no_clean_up", "no_tables",
-             "no_structure")
+             "no_structure", "no_areas")
 
 
 def _project(args: argparse.Namespace) -> Project:
@@ -69,14 +69,17 @@ def _project(args: argparse.Namespace) -> Project:
         if any(getattr(args, name) is not None for name in _SETTINGS):
             raise OptdocError("usage")
         project = Project.open(args.file, config=load_config(args.config))
+        project.scratch = _out(args)  # nothing of the document anywhere but there
         if args.no_cells:  # as before the configuration held it: no tables found
             project.leave_out_found_tables()
         return project
     options = Options(reader=args.reader or "auto", languages=args.languages,
                       tables=not args.no_tables, paper=args.paper or "a4", photo=args.photo,
                       clean_up=not args.no_clean_up, structure=not args.no_structure,
-                      cells=not args.no_cells)
-    return Project.open(args.file, options)
+                      cells=not args.no_cells, areas=not args.no_areas)
+    project = Project.open(args.file, options)
+    project.scratch = _out(args)  # nothing of the document anywhere but there
+    return project
 
 
 def _out(args: argparse.Namespace) -> Path:
@@ -183,6 +186,9 @@ def _document_options(pr: argparse.ArgumentParser) -> None:
                     help="raw OCR lines, no Markdown")
     pr.add_argument("--no-cells", action="store_true",
                     help="find no tables with their cells (extra 'tables'); "
+                         "a person can still set them in the window")
+    pr.add_argument("--no-areas", action="store_const", const=True,
+                    help="find no barcodes, stamps, pictures or handwriting; "
                          "a person can still set them in the window")
     pr.add_argument("--progress", action="store_true",
                     help='a line {"page": n, "of": m} on standard error per page')
