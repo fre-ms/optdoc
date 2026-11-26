@@ -57,9 +57,11 @@ def test_about(capsys: pytest.CaptureFixture[str]) -> None:
     """What an installation can do."""
     status, answer, _ = _answer(capsys, ["about"])
     assert status == 0
-    assert set(answer) == HEAD | {"version", "clean_up", "heic", "window", "upside_down"}
+    assert set(answer) == HEAD | {"version", "clean_up", "heic", "window", "upside_down",
+                                  "models"}
     assert answer["interface"] == INTERFACE and answer["version"] == __version__
     assert answer["made_with"] == f"optdoc {__version__}"
+    assert [m["name"] for m in answer["models"]] == ["page-orientation"]
 
 
 def _encrypted(path: Path) -> Path:

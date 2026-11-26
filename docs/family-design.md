@@ -196,6 +196,28 @@ being worked on:
 - What a model found is stored in the configuration document like OCR's words, so that a
   reproduction needs the model no more.
 
+**Built (stage 4, 26 November 2026):** the mechanism is doccor's (0.2.0: the catalogue,
+`fetch`, the door in the network lock that opens for that download alone, the commands), the
+same in optdoc, ocrdoc and docrepro, which lists the models of every step and hands every
+step the folder. **A model is listed only after it did better than the rules it adds to**,
+on a bench that is in the repository and runs on invented pages:
+
+- **Orientation: listed** (optdoc 0.8.0, `page-orientation`: PaddleOCR's
+  PP-LCNet_x1_0_doc_ori, Apache-2.0, 6.8 MB, run by OpenCV). It named the turn in 223 of 228
+  cases (57 images of invented pages, each shown the four ways up: worn scans, photos at a
+  slant, coarse scans, pages with one to three lines), was unsure in the other five and left
+  the page, and turned none wrongly, in 0.009 s a page; the lines of the text alone are
+  right for half the turns, and reading the page both ways takes 2 s
+  (`bench/orientation_bench.py`).
+- **Areas: not listed.** PP-DocLayout_plus-L (Apache-2.0, 130 MB) found 6 to 9 of 12 pictures
+  on ocrdoc's invented letters, with many areas where none was drawn, and none of the 6
+  stamps; the rules found 11 to 12 (ocrdoc's `bench/areas_bench.py`). Invented letters are
+  not what it was trained on: the fair test is on real documents, which only their owner
+  can run, on their own computer, with figures alone leaving it.
+- **Handwriting: not tried.** The one detector found (hwdet) is a single person's
+  repository some days old, with weights under the AGPL and, by its own account, 71 % of
+  handwritten pages found; not a download to offer.
+
 ## Formats
 
 | format | from | replaces |
@@ -233,9 +255,13 @@ Each stage is released and tested before the next; each keeps the chain reproduc
    medorello (from `optdoc edit` to `docrepro edit`) and to PseudonyMed (imports from
    ocrdoc and optdoc, the window's panels).
 4. **Models** as an optional download (areas, handwriting, orientation), each measured
-   against the rules it would replace.
+   against the rules it would replace (built 26 November 2026; one model listed, above).
 5. **tagdoc** (built 26 November 2026, before the standalone program, at the user's request);
-   **semdoc**, once lexterm and lexident are libraries.
+   **semdoc**, once lexterm and lexident are libraries. As of 26 November 2026 they are not:
+   both hold design, reports and benches; the code is lexcor's (0.1: the tagger, the
+   packages, the store), which gets its annotation document and its window for a person's
+   review with 0.2. semdoc waits for that (the user, 26 November 2026); its place in
+   docrepro (step 30, the entry point, the test with a stand-in) is kept.
 
 ## Decided (the user, 26 November 2026)
 

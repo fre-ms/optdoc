@@ -33,6 +33,8 @@ from doccor import documents
 from doccor.errors import DocError
 
 from optdoc import __version__, cleanup
+from optdoc import models as catalogue
+from optdoc import orientation as upright
 from optdoc.errors import OptdocError
 from optdoc.loading import open_document
 
@@ -84,13 +86,18 @@ class Options:
 
 @dataclass
 class _Page:
-    """The state of one page: its plan once decided (None: left as it came) and whether
-    a person decided it, and optdoc's suggestion (computed once)."""
+    """The state of one page: its plan once decided (None: left as it came), whether a
+    person decided it, and the models that took part in it where optdoc suggested it
+    (``found_with``; the configuration document says so, and the result is made again
+    without them); optdoc's suggestion (computed once) and the models that took part in
+    that (``suggested_with``)."""
 
     decided: bool = False
     plan: cleanup.CleanupPlan | None = None
     by_person: bool = False
+    found_with: list[str] = field(default_factory=list)
     suggestion: cleanup.CleanupPlan | None = field(default=None, repr=False)
+    suggested_with: list[str] = field(default_factory=list)
 
 
 def _copy(plan: cleanup.CleanupPlan | None) -> cleanup.CleanupPlan | None:
@@ -183,6 +190,7 @@ class Project:
         self.size = size
         self.options = options
         self.pages = [_Page() for _ in range(len(doc))]
+        self.models: Path | None = None  # the folder of models the suggestion may use
         self._layer: dict[int, bool] = {}
         self._images: dict[int, tuple[str, tuple[bytes, float, float]]] = {}
 
@@ -225,6 +233,10 @@ class Project:
             page.decided = True
             page.plan = None if plan is None else cleanup.CleanupPlan.from_dict(plan)
             page.by_person = entry["by"] == "person"
+            used = entry.get("models", [])
+            if not isinstance(used, list) or not all(isinstance(m, str) for m in used):
+                raise OptdocError("bad-config", reason="field")
+            page.found_with = list(used)
 
     def config(self) -> dict[str, Any]:
         """The configuration document: the input with every page's size, the settings,
@@ -235,10 +247,14 @@ class Project:
             plan = self.plan(n)
             rect = self.original[n].rect
             sizes.append({"width": round(rect.width, 3), "height": round(rect.height, 3)})
-            pages.append({"page": n + 1,
-                          "plan": plan.full_dict() if plan is not None else None,
-                          "by": "person" if page.by_person else "auto",
-                          "frame": self.frame(n)})
+            entry: dict[str, Any] = {"page": n + 1,
+                                     "plan": plan.full_dict() if plan is not None else None,
+                                     "by": "person" if page.by_person else "auto",
+                                     "frame": self.frame(n)}
+            used = page.found_with if page.decided else page.suggested_with
+            if used and plan is not None and not page.by_person:
+                entry["models"] = list(used)  # what took part in the suggestion
+            pages.append(entry)
         return {
             "format": FORMAT, "version": FORMAT_VERSION, "made_with": f"optdoc {__version__}",
             "input": {"sha256": self.sha256, "bytes": self.size,
@@ -280,10 +296,22 @@ class Project:
         if page.suggestion is None:
             if self.cleanable(n):
                 image, scale = cleanup.render(self.original[n], SUGGESTION_DPI)
+                turn = self._model_turn(image)  # None without the model, or where it is not sure
+                if turn:
+                    image = cleanup.apply_plan(image, cleanup.CleanupPlan(rotation=turn))
                 page.suggestion = cleanup.suggest(image, self.options.photo, scale)
+                page.suggestion.rotation = turn or 0
+                page.suggested_with = [] if turn is None else [catalogue.ORIENTATION.name]
             else:
                 page.suggestion = cleanup.CleanupPlan()
         return _copy(page.suggestion) or cleanup.CleanupPlan()
+
+    def _model_turn(self, image: Any) -> int | None:
+        """The clockwise turn that puts the page upright as the orientation model sees it
+        (:mod:`optdoc.orientation`); None where the model is not in the models folder, or
+        is not sure."""
+        model = catalogue.orientation(self.models)
+        return None if model is None else upright.upright(image, model)
 
     def plan(self, n: int) -> cleanup.CleanupPlan | None:
         """The plan of a page, a copy: as decided, else the suggestion (unless the
@@ -303,11 +331,12 @@ class Project:
 
     def set_plan(self, n: int, plan: cleanup.CleanupPlan | None, by_person: bool = True) -> None:
         """Decide the plan of a page: a person's (``by_person``), or optdoc's suggestion
-        taken back."""
+        taken back (with the models that took part in it)."""
         page = self.pages[n]
         page.decided = True
         page.plan = _copy(plan)
         page.by_person = by_person
+        page.found_with = [] if by_person else list(page.suggested_with)
 
     def frame(self, n: int) -> str:
         """The frame of a page as its plan prepares it (:func:`frame`)."""
@@ -340,11 +369,13 @@ class Project:
         return rect.width if plan.rotation in (0, 180) else rect.height
 
     def orientation(self, n: int) -> int:
-        """The quarter turns (clockwise, degrees) that put the page upright: portrait or
-        landscape from its lines, upside down where ocrdoc is installed to read it
-        (:func:`reader`)."""
+        """The quarter turns (clockwise, degrees) that put the page upright: as the
+        orientation model sees it, where it lies in the models folder and is sure; else
+        portrait or landscape from the page's lines, upside down where ocrdoc is installed
+        to read it (:func:`reader`)."""
         image, _scale = cleanup.render(self.original[n], SUGGESTION_DPI)
-        return cleanup.estimate_orientation(image, reader())
+        turn = self._model_turn(image)
+        return turn if turn is not None else cleanup.estimate_orientation(image, reader())
 
     # -- the result ----------------------------------------------------------------------------
     @property

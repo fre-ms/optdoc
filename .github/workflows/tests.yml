@@ -26,7 +26,17 @@ jobs:
           libegl1 libgl1 libopengl0 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4
           libxcb-keysyms1 libxcb-shape0 libxcb-xinerama0 libdbus-1-3 libfontconfig1
       - run: uv run ruff check optdoc tests bench
+      # The orientation model is an optional download. Fetched here by optdoc's own command
+      # (the only one that goes on the network) and kept between runs, so that the tests
+      # which need it run too; where its address does not answer, they are skipped.
+      - uses: actions/cache@v4
+        with:
+          path: models
+          key: models-${{ runner.os }}-${{ hashFiles('optdoc/models.py') }}
+      - run: uv run optdoc models fetch page-orientation --to models
+        continue-on-error: true
       - run: uv run pytest -v --timeout=600 --durations=15
         env:
           QT_QPA_PLATFORM: offscreen
+          OPTDOC_MODELS: models
 

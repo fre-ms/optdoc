@@ -54,14 +54,22 @@ original with both configuration documents gives every file of both steps again.
   included.
 - **Lets a person prepare it** in a window (extra `gui`, Qt): every page before and after, each step
   switchable, the sheet's corners to drag, areas to erase. The work can be saved and taken up again later.
+- **Sets a page upright that stands on its head or on its side**, where a small model lies in the folder
+  given with `--models` (6.8 MB, an optional download: `optdoc models fetch page-orientation`, the only
+  command that goes on the network, and only when asked). Without it optdoc works as before, and a person
+  turns such a page in the window. The turn is kept in the configuration document, so making the result
+  again needs no model.
 
 Decisions in the preparation are measured, not guessed: binarising a page (Sauvola) looked good and made
 RapidOCR nearly blind, so it is left to ocrdoc's filters, on its own copy; a scan tilted by as little as
 half a degree lost the grid of its tables (0 to 36 of 108 rows cut right), so the suggestion straightens
 from 0.3 degrees on (101 to 108 rows); neural unwarping (UVDoc) bent the tables of photographed laboratory
-reports, while a sheet unwarped by its corners in its true proportions read as well as with the true
-corners (1525 and 1522 of 1530 numbers on 30 invented photos). The tests guard the unwarping at a slant
-and that a red stamp stays red.
+reports, while a sheet unwarped by its corners in its true proportions read as well as with the true corners
+(1525 and 1522 of 1530 numbers on 30 invented photos). The orientation model was listed after it named the
+turn in 223 of 228 cases (57 images of invented pages, each shown the four ways up; worn scans, photos at a
+slant, coarse scans and pages with one to three lines among them), was unsure in the other five and left the
+page, and turned none wrongly (`bench/orientation_bench.py`); the lines of the text alone are right for half
+the turns. The tests guard the unwarping at a slant and that a red stamp stays red.
 
 ## Install
 
@@ -74,8 +82,9 @@ uv sync --extra cleanup --extra gui
 ```
 
 The `cleanup` extra brings OpenCV, NumPy, Pillow and HEIC support; the `gui` extra PySide6 (Qt, LGPL 3.0)
-for the window. With [ocrdoc](https://github.com/fre-ms/ocrdoc) installed beside it, the window also tells
-a page that stands on its head.
+for the window. A page that stands on its head is told by the orientation model, where it was fetched
+(below), or in the window by reading the page, where [ocrdoc](https://github.com/fre-ms/ocrdoc) is installed
+beside optdoc.
 
 ## Command line
 
@@ -85,6 +94,9 @@ optdoc run photo.heic --out results/
 optdoc run scan.pdf --scan --out results/
 optdoc edit photo.heic --out results/ --language en
 optdoc edit photo.heic --out results/ --config results/photo.optdoc.json
+optdoc models list
+optdoc models fetch page-orientation --to models/
+optdoc run scan.pdf --out results/ --models models/
 ```
 
 `run` writes `<name>.pdf` and `<name>.optdoc.json` into the folder given and nowhere else. `edit` opens
@@ -94,8 +106,13 @@ configuration document instead of optdoc's suggestions. Every command answers wi
 standard output, so that programs in any language can use optdoc as a helper; a failure too, with a
 fixed kind and its message in English and German, and exit status 2. No answer quotes a document or its
 path. Options: `--paper a4|a5|a3|letter|legal|image`, `--photo` or `--scan` (instead of telling by each
-page), `--no-clean-up`, `--colour-pages jpeg|png`, `--progress` (a line of JSON per page on standard
-error).
+page), `--no-clean-up`, `--colour-pages jpeg|png`, `--models <folder>`, `--progress` (a line of JSON per
+page on standard error).
+
+optdoc never goes on the network while it works. `models list` shows the models it can use, each with the
+address it comes from, its SHA-256, size and licence; `models fetch <name> --to <folder>` fetches one, and
+keeps it only when it is the file listed. An application can as well fetch the file itself from that
+address. `run` and `edit` use what lies in the folder of `--models`; what is not there is done without.
 [docs/interface.md](docs/interface.md) describes the answers, the kinds of error and the configuration
 document.
 
@@ -106,6 +123,7 @@ from optdoc import output
 from optdoc.project import Project, load_config
 
 project = Project.open("photo.heic")            # or config=load_config("results/photo.optdoc.json")
+project.models = None                           # or the folder of models the suggestion may use
 try:
     plan = project.plan(0)
     plan.contrast = True
@@ -125,8 +143,6 @@ words one in German, `"en"` in English. `optdoc.cleanup.describe(plan, "de")` wo
 ## Planned
 
 - Flattening curved pages (a book, a folded letter), finding the page in a photo more robustly.
-- Telling an upside-down page in the suggestion, by a small orientation model as an optional download
-  (`optdoc models fetch`, the only command that goes on the network, on a person's request).
 
 ## Licence
 

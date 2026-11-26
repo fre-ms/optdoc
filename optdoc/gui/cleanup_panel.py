@@ -310,8 +310,9 @@ class CleanupPanel(QWidget):
             self.changed.emit(n)
 
     def detect_orientation(self) -> None:
-        """Turn the page upright: portrait or landscape from the lines, upside down by a
-        short OCR comparison where ocrdoc is installed."""
+        """Turn the page upright: as the orientation model sees it, where it lies in the
+        models folder; else portrait or landscape from the lines, upside down by a short OCR
+        comparison where ocrdoc is installed."""
         try:
             degrees = self.project.orientation(self.number)
         except Exception as e:  # said in the note, the page stays as it is

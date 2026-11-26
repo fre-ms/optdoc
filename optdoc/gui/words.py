@@ -62,12 +62,14 @@ WORDS: dict[str, tuple[str, str]] = {  # key: (English, German)
     "sharpen": ("Sharpen", "Schärfen"),
     "strength": ("Strength 1 (gentle) to 5 (strong)", "Stärke 1 (sanft) bis 5 (kräftig)"),
     "orientation": ("Detect the orientation", "Ausrichtung erkennen"),
-    "orientation_tip": ("Portrait or landscape from the text lines; whether the text stands on its "
-                        "head is decided by a short OCR comparison where ocrdoc is installed "
-                        "(takes a few seconds).",
-                        "Hoch- oder Querformat aus den Textzeilen; ob der Text auf dem Kopf steht, "
-                        "entscheidet ein kurzer Vergleich der Texterkennung, wo ocrdoc installiert "
-                        "ist (dauert einige Sekunden)."),
+    "orientation_tip": ("Which way up the page stands: told at once by the orientation model, "
+                        "where it lies in the models folder; else portrait or landscape from the "
+                        "text lines, and whether the text stands on its head by a short OCR "
+                        "comparison where ocrdoc is installed (takes a few seconds).",
+                        "Wie herum die Seite steht: sofort mit dem Ausrichtungsmodell, wo es im "
+                        "Modellordner liegt; sonst Hoch- oder Querformat aus den Textzeilen, und "
+                        "ob der Text auf dem Kopf steht, über einen kurzen Vergleich der "
+                        "Texterkennung, wo ocrdoc installiert ist (dauert einige Sekunden)."),
     "rotate": ("Rotate", "Drehen"),
     "undo_mask": ("Take back the last area (Cmd/Ctrl+Z)",
                   "Letzten Bereich zurückholen (Cmd/Strg+Z)"),

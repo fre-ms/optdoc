@@ -1,7 +1,8 @@
 # optdoc's command line as an interface
 
-**Interface 3**, since optdoc 0.7.0. This is what a program may rely on when it calls optdoc,
-whatever language it is written in: a records app, a pseudonymiser, a script, docrepro.
+**Interface 3**, since optdoc 0.7.0 (this description: optdoc 0.8.0). This is what a program may
+rely on when it calls optdoc, whatever language it is written in: a records app, a pseudonymiser,
+a script, docrepro.
 
 Every answer carries `interface`. It goes up when something a caller relies on changes in a way
 that breaks it: a field or a kind of error removed or renamed, a meaning changed. Within one
@@ -19,12 +20,19 @@ kinds of error `unknown-reader`, `no-reader`, `reader-failed`, `not-ocr` and `pa
 `about`, `run` (the preparation part of `prepare`), the configuration document version 2 with a
 frame per page, and pages in their colours.
 
+**Added within interface 3 (optdoc 0.8.0):** models as an optional download: the commands
+`models list` and `models fetch`, the option `--models`, `models` in the answer of `about`, the
+key `models` on a page of the configuration document, and the kinds of error `unknown-model`,
+`model-unreachable` and `model-checksum`.
+
 ## Calling
 
 ```
 optdoc about
 optdoc run  <file> --out <folder> [options]
 optdoc edit <file> --out <folder> [options] [--language de|en]
+optdoc models list [--models <folder>]
+optdoc models fetch <name> --to <folder> [--progress]
 optdoc --version
 ```
 
@@ -39,26 +47,28 @@ Every answer has these two fields:
 | field | example | meaning |
 |---|---|---|
 | `interface` | `3` | the version of this description |
-| `made_with` | `"optdoc 0.7.0"` | the program and its version, for the record of what made a file |
+| `made_with` | `"optdoc 0.8.0"` | the program and its version, for the record of what made a file |
 
 ## `about`: what this installation can do
 
 ```json
-{"interface": 3, "made_with": "optdoc 0.7.0", "version": "0.7.0",
- "clean_up": true, "heic": true, "window": true, "upside_down": false}
+{"interface": 3, "made_with": "optdoc 0.8.0", "version": "0.8.0",
+ "clean_up": true, "heic": true, "window": true, "upside_down": false,
+ "models": [{"name": "page-orientation", "…": "…", "present": null}]}
 ```
 
 `clean_up` says whether the steps of the preparation are there (OpenCV and NumPy, the extra
 "cleanup"), `heic` whether HEIC and HEIF photos can be opened, `window` whether `edit` can open its
 window (PySide6, the extra "gui"), `upside_down` whether ocrdoc is installed to tell an upside-down
-page in the window.
+page in the window by reading it, `models` the models optdoc can use (as `models list` gives
+them, below).
 
 ## `run`: prepare a document
 
 ```
 optdoc run <file> --out <folder> [--config <file.optdoc.json | file.pdf>]
     [--paper a4|a5|a3|letter|legal|image] [--photo | --scan] [--no-clean-up]
-    [--colour-pages jpeg|png] [--progress]
+    [--colour-pages jpeg|png] [--models <folder>] [--progress]
 ```
 
 `<file>` is a PDF or an image (JPEG, PNG, TIFF, BMP, GIF, WebP, PNM, HEIC, HEIF). optdoc never
@@ -74,12 +84,12 @@ changes it, and always starts from it, never from an earlier result. It writes t
 With `--config`, optdoc starts from a configuration document instead of its suggestions: a
 `<stem>.optdoc.json`, or a PDF optdoc wrote, which carries it. The document then decides every
 setting; `--paper`, `--photo`, `--scan`, `--no-clean-up` and `--colour-pages` beside it are a
-`usage` error.
+`usage` error. `--models` may stand beside it: it changes nothing of what the document decides.
 
 The answer:
 
 ```json
-{"interface": 3, "made_with": "optdoc 0.7.0",
+{"interface": 3, "made_with": "optdoc 0.8.0",
  "pdf": "<folder>/<stem>.pdf", "config": "<folder>/<stem>.optdoc.json",
  "pages": 2, "cleaned_up": [1, 2], "unwarped": [1], "decided": []}
 ```
@@ -109,7 +119,10 @@ given, else by optdoc's suggestion:
   TIFF, and one given to it is stored exactly as a PNG.
 - **Orientation.** An image is turned as its EXIF orientation says; a PDF page turned by `/Rotate`
   is set upright without touching its picture (a JPEG stays byte for byte). The PDF has no turned
-  pages, and its coordinates are those of the page as shown.
+  pages, and its coordinates are those of the page as shown. A page that was scanned or
+  photographed on its head or on its side says so nowhere: with the model `page-orientation` in
+  the folder of `--models` (below), the suggestion sets such a page upright; without it the page
+  stays as it came, and a person turns it in the window.
 
 `--no-clean-up` leaves every page as it came, unless a person prepares it in the window.
 
@@ -120,10 +133,11 @@ given, else by optdoc's suggestion:
 {"page": 2, "of": 2}
 ```
 
-**Network.** optdoc never goes on the network. The command line refuses every attempt to resolve
-a name or open a connection before it does anything else (the answer would be the error
-`network`). A caller on macOS may also run optdoc under
-`sandbox-exec -p "(version 1)(allow default)(deny network*)"`.
+**Network.** `about`, `run`, `edit` and `models list` never go on the network. The command line
+refuses every attempt to resolve a name or open a connection before it does anything else (the
+answer would be the error `network`). A caller on macOS may also run them under
+`sandbox-exec -p "(version 1)(allow default)(deny network*)"`. The one command that goes out is
+`models fetch`, on request, for one file from the address listed (below).
 
 ## `edit`: the window
 
@@ -138,8 +152,9 @@ configuration document given), so that **Apply** at once gives the same files as
 before and after, every step switchable with its strength, rotation, the sheet's four corners
 dragged on the page before (also where optdoc found none), areas erased by dragging on the page
 after (Cmd/Ctrl+Z takes them back), "store in grey", the suggestion restored, a page left as it
-came, the steps copied to every page, the orientation detected (upside down where ocrdoc is
-installed), and for the whole document how pages in colour are stored (JPEG or PNG).
+came, the steps copied to every page, the orientation detected (upside down with the model
+`page-orientation` in the folder of `--models`, or where ocrdoc is installed), and for the whole
+document how pages in colour are stored (JPEG or PNG).
 
 | the person chooses | written into `<folder>` | answer |
 |---|---|---|
@@ -150,10 +165,61 @@ installed), and for the whole document how pages in colour are stored (JPEG or P
 `edit <file> --config <folder>/<stem>.optdoc.json` goes on where the person stopped; so does
 `--config <the PDF optdoc wrote>`. The window has no time limit and keeps no settings of its own.
 
+## `models`: optional downloads
+
+optdoc needs no model: every step works by its rules. A model is listed here only after it was
+measured against the rules it adds to (`bench/orientation_bench.py`, on invented pages), and it
+is never fetched unasked.
+
+```
+optdoc models list [--models <folder>]
+optdoc models fetch <name> --to <folder> [--progress]
+```
+
+`models list` answers with the models optdoc can use:
+
+```json
+{"interface": 3, "made_with": "optdoc 0.8.0",
+ "models": [{"name": "page-orientation", "file": "pp-lcnet-x1-0-doc-ori.onnx",
+             "url": "https://huggingface.co/PaddlePaddle/PP-LCNet_x1_0_doc_ori_onnx/resolve/7330ab7039123e46af2dc03154b9969aa412c61d/inference.onnx",
+             "sha256": "af9a0a4f317ff0709ce752067807f819cb15d883f8ecad89f28df1c6ee2d9c92",
+             "bytes": 6788069, "licence": "Apache-2.0",
+             "source": "https://huggingface.co/PaddlePaddle/PP-LCNet_x1_0_doc_ori_onnx",
+             "does": {"en": "tells which way up a page stands, …", "de": "erkennt, wie herum …"},
+             "present": true}]}
+```
+
+`url` is where the file comes from (https, a fixed revision), `sha256` and `bytes` what it must
+be, `licence` the licence of the weights and `source` the page that states it. `present` says
+whether the file lies in the folder of `--models` under the name `file` with that SHA-256 (`null`
+without `--models`, as in `about`).
+
+`models fetch <name> --to <folder>` is **the only command that goes on the network**: it fetches
+that one file from `url`, never more bytes than listed, and keeps it only when size and SHA-256
+are the ones listed (`model-checksum` otherwise, and nothing is kept). The request carries the
+address and a client name ("doccor" and its version), nothing of a document or a person. The
+answer: `{"model": "page-orientation", "file": "<folder>/pp-lcnet-x1-0-doc-ori.onnx", "bytes":
+6788069, "sha256": "…", "licence": "Apache-2.0"}`. With `--progress`, lines `{"bytes": n, "of":
+m}` go to standard error. A file that is already there and right is not fetched again. An
+application may as well fetch the file itself from the listed address and put it into the folder
+under the name `file`; a caller that runs optdoc without network runs this one command outside
+that fence, or does the download itself.
+
+`run` and `edit` take `--models <folder>` and use what lies there; a model that is missing, or a
+file that is not the one listed, is done without, and is no error.
+
+| model | size | what optdoc does with it |
+|---|---|---|
+| `page-orientation` | 6.8 MB | Sets a page upright that stands on its head or lies on its side, in the suggestion and in the window's "detect orientation". It answers only where it is sure and leaves a blank page as it is. On the bench (57 images of invented pages, each shown the four ways up: as made, worn scans, photos at a slant, coarse scans, pages with one to three lines) it named the turn of 223 of the 228, was unsure of the other five and left them, and turned none wrongly; the lines of the text alone tell portrait from landscape and are right for half the turns. PaddleOCR's PP-LCNet_x1_0_doc_ori, run by OpenCV. |
+
+**What a model found is kept.** The turn becomes the page's plan, and the page's entry in the
+configuration document names the model that took part (`"models": ["page-orientation"]`). Making
+the result again from the document needs no model and no `--models`.
+
 ## The configuration document: `optdoc-config`, version 2
 
 ```json
-{"format": "optdoc-config", "version": 2, "made_with": "optdoc 0.7.0",
+{"format": "optdoc-config", "version": 2, "made_with": "optdoc 0.8.0",
  "input": {"sha256": "…", "bytes": 245678, "suffix": ".jpg",
            "pages": [{"width": 595.276, "height": 841.89}]},
  "options": {"paper": "a4", "photo": null, "clean_up": true, "colour_pages": "jpeg"},
@@ -171,6 +237,8 @@ it belongs to by its SHA-256, and every page's size as it came; for another file
 refused (`config-mismatch`). `options` are the settings. Per page: its `plan` (`null` for a page
 left as it came; a plan may do nothing and still keep the sheet's corners it found), who decided
 it (`by`: "auto" as optdoc suggested it, "person" once a person changed it), and its `frame`.
+Where a model took part in a suggested plan, the entry also has `models`, the names of those
+models (`"models": ["page-orientation"]`); a plan a person decided names none.
 
 **The frame** is a fingerprint of where things lie on the prepared page: its size, and what of the
 plan moves the page (a quarter turn, the sheet's corners, the tilt straightened). Light, contrast,
@@ -186,7 +254,7 @@ document and with the PDF, and `edit`.
 ## Failures
 
 ```json
-{"interface": 3, "made_with": "optdoc 0.7.0", "error": "unsupported",
+{"interface": 3, "made_with": "optdoc 0.8.0", "error": "unsupported",
  "details": {"suffix": ".docx"},
  "message": {"en": "optdoc cannot open files of type .docx.",
              "de": "Dateien vom Typ .docx kann optdoc nicht öffnen."}}
@@ -211,6 +279,9 @@ what the message is made from, never a path or content.
 | `cancelled` | the person cancelled the window; nothing was written | |
 | `no-gui` | `edit`, and PySide6 is not installed | |
 | `network` | something tried to reach the network; it was stopped | |
+| `unknown-model` | `models fetch` names a model optdoc does not list | `name` |
+| `model-unreachable` | the model's address did not answer, or the download broke off | `name` |
+| `model-checksum` | what came is not the file listed (size or SHA-256); nothing was kept | `name` |
 | `usage` | the command line is not valid (the usage line goes to standard error) | |
 | `internal` | a fault of optdoc | `error`: the name of the exception class |
 

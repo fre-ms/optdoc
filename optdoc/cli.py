@@ -23,9 +23,11 @@ from pathlib import Path
 from typing import Any
 
 from doccor import cli as frame
+from doccor import models as modelstore
 
 from optdoc import __version__, cleanup
 from optdoc.errors import OptdocError
+from optdoc.models import CATALOGUE
 from optdoc.project import SUFFIX, Options, Project, load_config
 
 INTERFACE = 3  # the version of docs/interface.md the answers follow
@@ -39,7 +41,8 @@ def _about(args: argparse.Namespace) -> dict[str, Any]:
     return {"version": __version__, "clean_up": cleanup.available(),
             "heic": importlib.util.find_spec("pillow_heif") is not None,
             "window": gui.available(),
-            "upside_down": importlib.util.find_spec("ocrdoc") is not None}
+            "upside_down": importlib.util.find_spec("ocrdoc") is not None,
+            "models": modelstore.listing(CATALOGUE)}
 
 
 # the options that decide the result; with --config the configuration decides them
@@ -53,11 +56,15 @@ def _project(args: argparse.Namespace) -> Project:
     if args.config is not None:
         if any(getattr(args, name) is not None for name in _SETTINGS):
             raise OptdocError("usage")
-        return Project.open(args.file, config=load_config(args.config))
+        project = Project.open(args.file, config=load_config(args.config))
+        project.models = args.models
+        return project
     options = Options(paper=args.paper or "a4", photo=args.photo,
                       clean_up=not args.no_clean_up,
                       colour_pages=args.colour_pages or cleanup.COLOUR_PAGES[0])
-    return Project.open(args.file, options)
+    project = Project.open(args.file, options)
+    project.models = args.models
+    return project
 
 
 def _out(args: argparse.Namespace) -> Path:
@@ -134,6 +141,7 @@ def _document_options(pr: argparse.ArgumentParser) -> None:
     pr.add_argument("--colour-pages", choices=list(cleanup.COLOUR_PAGES),
                     help="how a page in colour is stored: jpeg (default, quality 92) or png "
                          "(lossless, some ten times the size)")
+    frame.add_models_option(pr)
     pr.add_argument("--progress", action="store_true",
                     help='a line {"page": n, "of": m} on standard error per page')
 
@@ -152,11 +160,13 @@ def _parser() -> argparse.ArgumentParser:
     ed.add_argument("--language", choices=["de", "en"],
                     help="language of the window (default: the system's)")
     ed.add_argument("--self-test", action="store_true", help=argparse.SUPPRESS)
+    frame.add_models(sub, TOOL)
     return p
 
 
 COMMANDS: dict[str, Callable[[argparse.Namespace], dict[str, Any]]] = {
-    "about": _about, "run": _run, "edit": _edit}
+    "about": _about, "run": _run, "edit": _edit,
+    "models": frame.models_command(CATALOGUE, TOOL)}
 
 
 def main(argv: Sequence[str] | None = None) -> int:

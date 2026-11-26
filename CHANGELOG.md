@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.8.0 (2026-11-26)
+
+Models as an optional download, and the first one: a page that stands on its head or lies on
+its side is set upright in the suggestion. optdoc needs no model and fetches none unasked.
+Interface 3 and `optdoc-config` version 2 stay: everything here is added.
+
+### Added
+
+- **`optdoc models list [--models <folder>]`** shows the models optdoc can use, each with the
+  address it comes from (https, a fixed revision), its SHA-256, size, licence and the page
+  that states the licence, and whether it lies in the folder given. `about` lists them too.
+- **`optdoc models fetch <name> --to <folder> [--progress]`**, the only command that goes on
+  the network, and only when asked: it fetches that one file and keeps it only when its size
+  and SHA-256 are the ones listed. Kinds of error `unknown-model`, `model-unreachable`,
+  `model-checksum`. The mechanism is doccor's (0.2.0), the same for every tool of docrepro.
+- **`--models <folder>`** for `run` and `edit`: what lies there is used, what does not is done
+  without. Work stays off the network.
+- **The model `page-orientation`** (PaddleOCR's PP-LCNet_x1_0_doc_ori, Apache-2.0, 6.8 MB;
+  OpenCV runs it, optdoc gains no dependency): the suggestion turns a page upright that
+  stands on its head or on its side, and "Detect the orientation" in the window asks it
+  first. It decides only where it is sure (a probability of 0.8), by the middle of the page
+  as it was trained, and where that shows it little, by the middle of what is written; a
+  blank page is left as it is. Measured on invented pages, each turned four ways
+  (`bench/orientation_bench.py`), the turn that puts the page upright was named:
+
+  | pages | of | lines only | lines and OCR | the model |
+  |---|---|---|---|---|
+  | as made | 56 | 28 | 56 | 56 |
+  | worn scans (askew, grainy) | 56 | 28 | 56 | 55 |
+  | photographed at a slant | 48 | 24 | not measured | 44 |
+  | scanned at 60 dpi | 48 | 24 | not measured | 48 |
+  | one to three lines of text | 20 | 10 | not measured | 20 |
+  | seconds per page | | 0.002 | 2.1 | 0.009 |
+
+  Where the model was not right it was not sure and left the page (five pages); it turned no
+  page of the bench wrongly.
+- **The configuration document** names the model that took part in a suggested plan
+  (`"models": ["page-orientation"]` on the page's entry); a plan a person decided names none.
+  The turn is in the plan, so the same file and document give the same result without the
+  model.
+
+### Changed
+
+- optdoc needs doccor 0.2.
+
 ## 0.7.0 (2026-11-26)
 
 optdoc does one thing now: it makes a photographed or scanned page **faithful**. Reading it

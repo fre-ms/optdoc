@@ -10,6 +10,8 @@ The modules:
 
 - :mod:`optdoc.loading`: open PDFs and images (HEIC too), images placed on a paper size;
 - :mod:`optdoc.cleanup`: the steps of the preparation and their automatic suggestion;
+- :mod:`optdoc.orientation` and :mod:`optdoc.models`: which way up a page stands, told by
+  a model where one was fetched (an optional download);
 - :mod:`optdoc.project`: the preparation of one document and its configuration document;
 - :mod:`optdoc.output`: the PDF of the prepared pages;
 - :mod:`optdoc.errors`: optdoc's own kinds of error, worded in English and German;
@@ -19,4 +21,4 @@ What every tool of docrepro shares (configuration documents, the command line's 
 no network, the window's building blocks) is doccor's (:mod:`doccor`).
 """
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
