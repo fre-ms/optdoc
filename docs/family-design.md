@@ -150,6 +150,13 @@ out), and the standalone program: one Python with every tool inside, called as
 `docrepro optdoc …`, `docrepro ocrdoc …` or as a whole, so that a records app ships one
 program, not four of 160 MB each.
 
+**semdoc and tagdoc** have their places in docrepro from the start (orders 30 and 40, what
+they take and give, their formats). A step joins the chain by being installed: docrepro
+brings the adapters of optdoc and ocrdoc, and a step to come brings its own through the
+entry-point group `docrepro.steps` (an adapter opens the step's project on its input, gives
+its configuration document, writes its result and names the pages whose decisions went).
+A chain document that names a step which is not installed is refused (`step-missing`).
+
 ## The command lines
 
 Every tool alike:

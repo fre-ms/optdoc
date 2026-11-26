@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.7.0 (unreleased)
+## 0.7.0 (2026-11-26)
 
 optdoc does one thing now: it makes a photographed or scanned page **faithful**. Reading it
 (OCR, areas, tables, barcodes, the text layer, the reading, the bench) moved to **ocrdoc**,
