@@ -52,7 +52,7 @@ def target_triple() -> str:
 
 def build(name: str, identity: str | None, onedir: bool = False) -> Path:
     """Run PyInstaller on the specification; returns the program.  PyInstaller loads ONNX
-    Runtime to collect it, which would start its telemetry (see optdoc.offline)."""
+    Runtime to collect it, which would start its telemetry (see doccor.offline)."""
     env = {**os.environ, "OPTDOC_BINARY_NAME": name, "ORT_DISABLE_TELEMETRY": "1"}
     if identity:
         env["OPTDOC_CODESIGN_IDENTITY"] = identity

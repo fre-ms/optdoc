@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from doccor.gui.view import PageView
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QKeyEvent, QMouseEvent, QPen
 from PySide6.QtWidgets import (
@@ -24,7 +25,6 @@ from PySide6.QtWidgets import (
 )
 
 from optdoc import layout
-from optdoc.gui.view import PageView
 from optdoc.layout import Region
 
 # FineReader's colours where it has the kind

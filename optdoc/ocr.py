@@ -21,9 +21,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple, Protocol
 
 import pymupdf
+from doccor.offline import no_telemetry
 
 from optdoc.errors import OCRError, OptdocError
-from optdoc.offline import no_telemetry
 from optdoc.pagetext import PageText
 from optdoc.settings import load_settings
 

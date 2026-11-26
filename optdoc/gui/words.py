@@ -1,15 +1,14 @@
-"""Every word the window shows, in English and German.
-
-The window takes the language of the application that opens it (``--language``), else
-that of the system.  Text that comes from optdoc's core (the description of a clean-up,
-an error) has its own two languages (:func:`optdoc.cleanup.describe`,
-:func:`optdoc.errors.describe_error`).
+"""Every word optdoc's window shows, in English and German, registered with the words of
+doccor (:mod:`doccor.gui.words`), which give them in the language of the application that
+opens the window (``--language``), else that of the system.  Text that comes from optdoc's
+core (the description of a clean-up, an error) has its own two languages
+(:func:`optdoc.cleanup.describe`, :func:`optdoc.errors.describe_error`).
 """
 
 from __future__ import annotations
 
-import locale
-import os
+from doccor.gui import words as _words
+from doccor.gui.words import LANGUAGES, Words, system_language
 
 WORDS: dict[str, tuple[str, str]] = {  # key: (English, German)
     "title": ("optdoc: {name}", "optdoc: {name}"),
@@ -150,26 +149,5 @@ WORDS: dict[str, tuple[str, str]] = {  # key: (English, German)
                         "Erkenne die Bereiche auf Seite {number} …"),
 }
 
-LANGUAGES = ("en", "de")
-
-
-def system_language() -> str:
-    """The language of the system: German where it is set so, else English."""
-    for name in ("LC_ALL", "LC_MESSAGES", "LANG"):
-        value = os.environ.get(name, "")
-        if value and value not in ("C", "POSIX"):
-            return "de" if value.lower().startswith("de") else "en"
-    current = locale.getlocale()[0] or ""
-    return "de" if current.lower().startswith("de") else "en"
-
-
-class Words:
-    """The words of one language: ``words("page", number=2)``."""
-
-    def __init__(self, language: str | None = None) -> None:
-        self.language = language if language in LANGUAGES else system_language()
-
-    def __call__(self, key: str, **values: object) -> str:
-        """The word ``key`` in this language, its placeholders filled in."""
-        english, german = WORDS[key]
-        return (german if self.language == "de" else english).format(**values)
+_words.register(WORDS)
+__all__ = ["LANGUAGES", "WORDS", "Words", "system_language"]

@@ -16,12 +16,12 @@ embedded file (``optdoc.json``) without dates.
 
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 from typing import Any
 
 import pymupdf
+from doccor import documents
 
 from optdoc import __version__, textlayer
 from optdoc.errors import OptdocError
@@ -122,19 +122,6 @@ def markdown(reading: Reading) -> str:
     return "\n".join(parts)
 
 
-def _embed(doc: pymupdf.Document, config: bytes) -> None:
-    """Put the configuration into the PDF as an embedded file, without the dates MuPDF
-    would give it (they would make every run different)."""
-    # PyMuPDF returns the xref of the file specification; its type hints say nothing.
-    xref: int = doc.embfile_add(  # type: ignore[func-returns-value, assignment]
-        EMBEDDED, config, filename=EMBEDDED,
-        desc="optdoc configuration: makes this PDF again from the original")
-    kind, value = doc.xref_get_key(xref, "EF/F")
-    stream = int(value.split()[0]) if kind == "xref" else xref
-    for key in ("Params/CreationDate", "Params/ModDate"):
-        doc.xref_set_key(stream, key, "null")
-
-
 def searchable_pdf(reading: Reading) -> bytes:
     """The cleaned-up document with an invisible text layer on every OCR page, carrying
     the configuration; its file identifier is made from the configuration, so that the
@@ -146,14 +133,11 @@ def searchable_pdf(reading: Reading) -> bytes:
             if s.ocr:
                 font = font or textlayer.add_font(duplicate)
                 textlayer.write_page(duplicate, duplicate[s.number], s.text, font)
-        made_by = f"optdoc {__version__}"
-        duplicate.set_metadata({"producer": made_by, "creator": made_by})
         config = config_bytes(reading.config) if reading.config is not None else b""
         if config:
-            _embed(duplicate, config)
-        ident = hashlib.sha256(config + made_by.encode()).hexdigest()[:32].upper()
-        duplicate.xref_set_key(-1, "ID", f"[<{ident}><{ident}>]")
-        return duplicate.tobytes(garbage=3, deflate=True, no_new_id=True)
+            documents.embed(duplicate, EMBEDDED, config,
+                            "optdoc configuration: makes this PDF again from the original")
+        return documents.finished_pdf(duplicate, [config], f"optdoc {__version__}")
     finally:
         duplicate.close()
 

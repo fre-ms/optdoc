@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.7.0 (unreleased)
+
+The first stage of dividing optdoc into tools of one step each (`docs/family-design.md`):
+what every tool of reprodoc shares is now doccor's, a library of its own. optdoc behaves
+as before; its interface (2) and formats are unchanged.
+
+### Changed
+
+- optdoc depends on **doccor**: the configuration document's mechanics (its bytes, the
+  SHA-256 of the input, reading it from a file or a PDF, embedding it without dates, the
+  PDF's identifier), the common kinds of error and their wording, the command line's
+  manners (one JSON answer, usage errors as answers, standard error for its own lines),
+  the network lock and ONNX Runtime's telemetry switch, and the window's page view,
+  worker and words. optdoc registers its own kinds of error and words there.
+
+### Removed
+
+- `optdoc.offline` (now `doccor.offline`), `optdoc.gui.view` and `optdoc.gui.worker` (now
+  in `doccor.gui`).
+
 ## 0.6.0 (2026-11-26)
 
 Areas, as in FineReader: a page is divided into regions, found automatically and corrected by

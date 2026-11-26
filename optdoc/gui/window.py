@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from doccor.gui.worker import Worker
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
@@ -36,7 +37,6 @@ from optdoc.gui.cleanup_panel import CleanupPanel
 from optdoc.gui.regions_panel import RegionsPanel
 from optdoc.gui.text_panel import TextPanel
 from optdoc.gui.words import Words
-from optdoc.gui.worker import Worker
 from optdoc.project import Project
 
 

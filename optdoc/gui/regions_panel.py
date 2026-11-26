@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from doccor.gui.view import PREVIEW_DPI
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (
@@ -28,7 +29,6 @@ from PySide6.QtWidgets import (
 
 from optdoc import layout
 from optdoc.gui.regions_view import COLOURS, TOOLS, RegionsView
-from optdoc.gui.view import PREVIEW_DPI
 from optdoc.gui.words import Words
 from optdoc.project import Project
 

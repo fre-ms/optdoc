@@ -27,7 +27,6 @@ from __future__ import annotations
 import contextlib
 import functools
 import gc
-import hashlib
 import json
 import shutil
 import tempfile
@@ -37,6 +36,8 @@ from pathlib import Path
 from typing import Any
 
 import pymupdf
+from doccor import documents
+from doccor.errors import DocError
 
 from optdoc import __version__, areas, cleanup, layout, tables, textlayer
 from optdoc import ocr as ocrlib
@@ -161,38 +162,19 @@ def _word_from(row: Any) -> ocrlib.OCRWord:
 
 def digest(path: Path) -> str:
     """The SHA-256 of a file, as the configuration names it."""
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
+    return documents.digest(path)
 
 
 def load_config(path: str | Path) -> dict[str, Any]:
     """A configuration from its file, or from the PDF optdoc wrote, which carries it.
     Raises "missing", or "bad-config" (reason "json" or "format") for a file that holds
     none optdoc can read."""
-    path = Path(path)
-    if not path.is_file():
-        raise OptdocError("missing")
     try:
-        if path.suffix.lower() == ".pdf":
-            with pymupdf.open(path) as doc:
-                if EMBEDDED not in doc.embfile_names():
-                    raise OptdocError("bad-config", reason="format")
-                raw = doc.embfile_get(EMBEDDED)
-        else:
-            raw = path.read_bytes()
-        config = json.loads(raw.decode("utf-8"))
-    except OptdocError:
-        raise
-    except Exception as e:
-        raise OptdocError("bad-config", reason="json") from e
-    if not isinstance(config, dict) or config.get("format") != FORMAT:
-        raise OptdocError("bad-config", reason="format")
-    if config.get("version") != FORMAT_VERSION:
-        raise OptdocError("bad-config", reason="format")
-    return config
+        return documents.load_document(path, FORMAT, FORMAT_VERSION, EMBEDDED, "optdoc")
+    except DocError as e:  # optdoc's own, so that callers catch one kind of error
+        reason = e.details.get("reason")
+        raise (OptdocError(e.kind, reason=reason) if reason is not None
+               else OptdocError(e.kind)) from e
 
 
 class Project:
@@ -705,4 +687,4 @@ def _tables(regions: list[layout.Region], text: PageText) -> list[Table]:
 
 def config_bytes(config: dict[str, Any]) -> bytes:
     """A configuration as optdoc writes it: JSON, the same bytes for the same content."""
-    return (json.dumps(config, ensure_ascii=False, indent=1) + "\n").encode("utf-8")
+    return documents.document_bytes(config)

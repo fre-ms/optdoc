@@ -15,10 +15,12 @@ The modules:
 - :mod:`optdoc.reading`: the pipeline, page by page: open, clean up, read, structure;
 - :mod:`optdoc.output`: the searchable PDF, the reading as JSON, Markdown, the plan;
 - :mod:`optdoc.textlayer`: the invisible text layer, one line per OCR line;
-- :mod:`optdoc.errors`: the kinds of error and their wording in English and German;
-- :mod:`optdoc.offline`: no network, no telemetry;
+- :mod:`optdoc.errors`: optdoc's own kinds of error, worded in English and German;
 - :mod:`optdoc.settings`: the settings of the OCR layer;
 - :mod:`optdoc.cli` and :mod:`optdoc.bench`: the command line and the test bench.
+
+What every tool of reprodoc shares (configuration documents, the command line's manners,
+no network, the window's building blocks) is doccor's (:mod:`doccor`).
 """
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"

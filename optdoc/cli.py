@@ -11,30 +11,27 @@ at all.  ``--progress`` writes a line of JSON per page to standard error.  ``pre
 ``edit`` take a configuration (``--config``) and make the same result from it every time
 (:mod:`optdoc.project`).
 
-The command line never goes on the network (:mod:`optdoc.offline`).
+The command line keeps the manners every tool of reprodoc keeps (:mod:`doccor.cli`): one
+JSON answer whatever happens, standard error for its own lines, and never the network
+(:mod:`doccor.offline`).
 """
 
 from __future__ import annotations
 
 import argparse
-import contextlib
 import importlib.util
-import json
-import os
-import sys
-import warnings
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any, NoReturn, TextIO
+from typing import Any
 
-from optdoc import __version__, areas, cleanup, offline, tables
+from doccor import cli as frame
+
+from optdoc import __version__, areas, cleanup, tables
 from optdoc import ocr as ocrlib
-from optdoc.errors import LANGUAGES, OptdocError
+from optdoc.errors import OptdocError
 from optdoc.project import SUFFIX, Options, Project, load_config
 
 INTERFACE = 2  # the version of docs/interface.md the answers follow
-STATUS_ERROR = 2
-_said: TextIO = sys.stderr  # where optdoc's own lines on standard error go (see _own_stderr)
 
 
 def _heic() -> bool:
@@ -49,12 +46,6 @@ def _readers(args: argparse.Namespace) -> dict[str, Any]:
     return {"version": __version__, "readers": ocrlib.available_backends(),
             "clean_up": cleanup.available(), "heic": _heic(), "tables": tables.available(),
             "window": gui.available(), "barcodes": areas.barcodes_available()}
-
-
-def _progress(page: int, of: int) -> None:
-    """One line of progress on standard error: the page about to be done, of how many."""
-    _said.write(json.dumps({"page": page, "of": of}) + "\n")
-    _said.flush()
 
 
 # the options that decide the result; with --config the configuration decides them
@@ -91,7 +82,7 @@ def _results(project: Project, args: argparse.Namespace) -> dict[str, Any]:
     """Make the result of a project, write it, and sum it up."""
     from optdoc import output
 
-    reading = project.build(_progress if args.progress else None)
+    reading = project.build(frame.progress if args.progress else None)
     try:
         paths = output.write(reading, _out(args))
         return {
@@ -150,17 +141,6 @@ def _bench(args: argparse.Namespace) -> dict[str, Any]:
     return {"documents_found": len(documents_in(args.folder)), **result}
 
 
-class _Parser(argparse.ArgumentParser):
-    """An argument parser whose complaints become an answer of kind "usage": the usage
-    line goes to standard error, the arguments themselves are never repeated (one of
-    them is the path of a document)."""
-
-    def error(self, message: str) -> NoReturn:
-        """Show the usage and fail with kind "usage"."""
-        self.print_usage(_said)
-        raise OptdocError("usage")
-
-
 def _document_options(pr: argparse.ArgumentParser) -> None:
     """The options of prepare and edit.  The settings default to None, so that the use of
     one beside ``--config`` can be told."""
@@ -196,7 +176,8 @@ def _document_options(pr: argparse.ArgumentParser) -> None:
 
 def _parser() -> argparse.ArgumentParser:
     """The argument parser."""
-    p = _Parser(prog="optdoc", description="Make photographed and scanned documents legible.")
+    p = frame.Parser(prog="optdoc",
+                     description="Make photographed and scanned documents legible.")
     p.add_argument("--version", action="version", version=f"optdoc {__version__}")
     sub = p.add_subparsers(dest="command", required=True)
     sub.add_parser("readers", help="list the OCR engines and abilities of this installation")
@@ -219,66 +200,7 @@ COMMANDS: dict[str, Callable[[argparse.Namespace], dict[str, Any]]] = {
     "readers": _readers, "prepare": _prepare, "edit": _edit, "bench": _bench}
 
 
-def _failure(error: OptdocError) -> dict[str, Any]:
-    """The answer for a failure: its kind, its details, its message in every language."""
-    return {"error": error.kind, "details": error.details,
-            "message": {language: error.message(language) for language in LANGUAGES}}
-
-
-def _quiet() -> None:
-    """Keep standard error for the progress lines: no warnings of the libraries, and no
-    messages of MuPDF, which may name the file it failed on."""
-    import pymupdf
-
-    warnings.simplefilter("ignore")
-    pymupdf.TOOLS.mupdf_display_errors(False)
-    pymupdf.TOOLS.mupdf_display_warnings(False)
-
-
-@contextlib.contextmanager
-def _own_stderr() -> Iterator[TextIO]:
-    """Standard error for optdoc's own lines only.  Libraries write to it below Python, where
-    no setting reaches them (ONNX Runtime warned about PCI buses on Linux, in colour); for
-    the time of a command the descriptor points at the null device, and optdoc's lines go
-    through a copy of the real one, which is put back afterwards."""
-    sys.stderr.flush()
-    try:
-        kept = os.dup(2)
-    except OSError:  # no standard error to begin with
-        yield sys.stderr
-        return
-    null = os.open(os.devnull, os.O_WRONLY)
-    os.dup2(null, 2)
-    os.close(null)
-    stream = os.fdopen(os.dup(kept), "w", encoding="utf-8", errors="replace")
-    try:
-        yield stream
-    finally:
-        stream.close()
-        sys.stderr.flush()
-        os.dup2(kept, 2)
-        os.close(kept)
-
-
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the command line; returns the exit status."""
-    global _said
-    offline.no_telemetry()
-    offline.forbid_network()
-    _quiet()
-    try:
-        with _own_stderr() as _said:
-            try:
-                args = _parser().parse_args(argv)
-                answer, status = COMMANDS[args.command](args), 0
-            except OptdocError as error:
-                answer, status = _failure(error), STATUS_ERROR
-            except Exception as error:  # a fault of optdoc: its message might quote a document
-                answer = _failure(OptdocError("internal", error=type(error).__name__))
-                status = STATUS_ERROR
-    finally:  # --help and --version leave by SystemExit
-        _said = sys.stderr
-    head = {"interface": INTERFACE, "made_with": f"optdoc {__version__}"}
-    json.dump({**head, **answer}, sys.stdout, ensure_ascii=False, indent=1)
-    sys.stdout.write("\n")
-    return status
+    return frame.main(_parser(), COMMANDS, tool="optdoc", version=__version__,
+                      interface=INTERFACE, argv=argv)

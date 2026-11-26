@@ -210,6 +210,14 @@ wheels = [
 ]
 
 [[package]]
+name = "doccor"
+version = "0.1.0"
+source = { git = "https://github.com/fre-ms/doccor?tag=v0.1.0#a5a61fd2384ad242822e180298e7dbd3d8a81959" }
+dependencies = [
+    { name = "pymupdf" },
+]
+
+[[package]]
 name = "et-xmlfile"
 version = "2.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -416,9 +424,10 @@ wheels = [
 
 [[package]]
 name = "optdoc"
-version = "0.6.0"
+version = "0.7.0"
 source = { editable = "." }
 dependencies = [
+    { name = "doccor" },
     { name = "pymupdf" },
 ]
 
@@ -452,6 +461,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "camelot-py", marker = "extra == 'tables'", specifier = ">=2.2" },
+    { name = "doccor", git = "https://github.com/fre-ms/doccor?tag=v0.1.0" },
     { name = "onnxruntime", marker = "extra == 'ocr'", specifier = ">=1.18" },
     { name = "pillow", marker = "extra == 'ocr'", specifier = ">=10" },
     { name = "pillow-heif", marker = "extra == 'ocr'", specifier = ">=0.18" },

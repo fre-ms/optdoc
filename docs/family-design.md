@@ -1,0 +1,229 @@
+# The reprodoc family: one tool for one step
+
+Status: design, 26 November 2026, with the user's decisions of the same day (at the end).
+optdoc 0.6.0 is the last release that does everything in one; the core (doccor) is the
+first stage.
+
+**reprodoc** reproduces photographed and scanned documents as digital documents. (Said this
+way wherever the name stands: in German medicine "Repro" first suggests reproductive
+medicine.)
+
+## Why
+
+optdoc has grown into a tool that does everything: it prepares a photographed or scanned
+page, reads it, divides it into areas, finds tables, barcodes and stamps, and writes a
+searchable PDF. Two of its aims work against each other. To prepare a page for OCR, it
+turns photographs grey and erases coloured ink (stamps, blue signatures, highlighting);
+the PDF a records app files as the next version of a report then lacks its stamp and its
+colour. A reproduction of the document has to keep them.
+
+So the work is divided by the Unix principle, one tool for one step, each usable on its
+own and together, each replaceable by another program:
+
+| tool | its one step | takes | gives |
+|---|---|---|---|
+| **optdoc** | make the page faithful: upright, unwarped, in its true proportions, evenly lit, in its own colours | a photo, a scan, any PDF | a PDF of the prepared pages |
+| **ocrdoc** | recognise: areas, text, tables, barcodes | any PDF (optdoc's, or another program's) | the same pages with a text layer, the reading, Markdown |
+| **semdoc** | understand: medical terms and identifying information, with their codes (through lexterm and lexident) | a reading | the annotations |
+| **tagdoc** | describe: what the document is (kind, date, sender, recipient) | a document with its reading and annotations | its metadata (in the PDF and beside it) |
+| **reprodoc** | the whole way, in one window and one program | a photo or a scan | a real digital document |
+
+A small shared core, **doccor** (as lexcor is for lexterm and lexident), holds what every
+tool needs, so that nothing is written twice.
+
+## Every step can be reproduced and resumed
+
+The requirement from the start: **an input file and the configuration document of a step
+give that step's result again, byte for byte**, and the configuration document lets a
+person stop at any point and go on later. Every tool keeps to the same contract, which the
+core implements once.
+
+### The configuration document
+
+Each tool writes one per input: `<stem>.optdoc.json`, `<stem>.ocrdoc.json`,
+`<stem>.semdoc.json`, `<stem>.tagdoc.json`, and reprodoc `<stem>.reprodoc.json` for the
+whole way. It is JSON (UTF-8, the same bytes for the same content), and its name says so;
+the part before `.json` names the tool.
+
+```json
+{"format": "ocrdoc-config", "version": 1, "made_with": "ocrdoc 0.1.0",
+ "input": {"sha256": "…", "bytes": 245678, "suffix": ".pdf",
+           "pages": [{"width": 595.28, "height": 841.89, "frame": "…"}]},
+ "options": {"…": "…"},
+ "pages": [{"page": 1, "…": "what was found, what a person decided"}]}
+```
+
+- **`input`** names the file the step worked on by its SHA-256 and gives every page's
+  size and frame (a fingerprint of where things lie on it; below). Another file is refused
+  ("config-mismatch"), unless only its looks changed (below).
+- **`options`**: every setting that decides the result.
+- **`pages`**: per page, everything the step decided, and the results of everything that
+  is not deterministic, stored so that it never runs again for a reproduction: the words
+  an OCR engine read, the areas a finder found, what a model said. A person's decisions
+  are marked as theirs (`"by": "person"`), so that what a machine proposed and what a
+  person checked stay apart.
+- **Nothing else**: no paths, no times, no user, no machine. Numbers are stored rounded,
+  and the result is always made from the stored, rounded values, live or reproduced.
+- A page not done yet has `null` where its results would be: the document can be saved at
+  any moment, and the step goes on from there (`<tool> edit <input> --config <doc>`).
+
+### The output carries the way it was made
+
+Every PDF a tool writes carries the configuration documents of all the steps that made
+it, as embedded files (`optdoc.json`, `ocrdoc.json`, …): ocrdoc copies optdoc's from its
+input and adds its own. A finished document therefore says how it was made, and with the
+original it is made again. The PDF has no time in it and a file identifier made from its
+configuration documents, so that the same documents give the same bytes. A records app
+may add its own metadata as an incremental update; the embedded documents stay readable.
+
+### The chain
+
+A step's input is the output of the step before (or any file a person brings). Since that
+output is reproducible to the byte, the chain is: the original and the configuration
+documents give the final document again. `<stem>.reprodoc` holds the way as a whole: the
+original's SHA-256 and every step's document, so that `reprodoc run <original> --config
+<stem>.reprodoc.json` makes everything again and `reprodoc edit` goes on where the person
+stopped.
+
+**When a person changes an earlier step** (more contrast in optdoc), the later steps'
+inputs change and their documents no longer fit by hash. They are not thrown away: a
+step's document also records every page's **frame**, a fingerprint of the page's geometry
+(its size, and the turning, unwarping and straightening that made it). Where the frame of
+a page is unchanged, what a person decided on it stays (areas they drew, a table grid they
+set, text they corrected), and what a machine found is found again (OCR reads the page
+anew). Where the frame changed, the page's decisions no longer fit and go, and the answer
+says which (`dropped`). This rule is the same in every tool and in the window.
+
+### What "the same" means
+
+The guarantee holds for the same version of a tool (`made_with`). A new version may make a
+different result from the same document (a better unwarping, a better table finder); the
+document still opens and goes on, and the step's result changes once, deliberately.
+
+## What goes where
+
+From today's optdoc (modules in parentheses):
+
+**optdoc** keeps the preparation of the page: opening PDFs and images, EXIF and `/Rotate`
+upright, paper sizes (`loading`); the sheet's corners, true proportions, quarter turns,
+straightening, dark borders, even lighting, noise, contrast, sharpening, areas erased
+(`cleanup`), its suggestion, the clean-up tab of the window. Two changes:
+
+- **Its output keeps the page's colours**: evening out the light works per colour channel,
+  and nothing erases coloured ink. A stamp stays in the document.
+- **Upside down** is told without an OCR engine: by the lines as today for a quarter turn,
+  and for half a turn either by a small orientation model (an optional download, below) or
+  by asking ocrdoc where it is installed (a provider, not a dependency).
+
+**ocrdoc** takes the recognition: the engines (`ocr`), page text with a box for every
+character (`pagetext`), the text layer (`textlayer`), corrections (`alignment`), structure
+and Markdown (`structure`), areas and table grids (`layout`), barcodes, pictures, stamps and
+handwriting (`areas`), tables (`tables`), the reading, the bench of laboratory reports
+(`bench`), the areas and text tabs of the window. The steps that only help OCR move here
+and work on ocrdoc's own copy of each page, never on the document: upscaling, letter mode,
+taking coloured ink away, ruled lines away, black and white, Tesseract's second pass over
+ruled tables. ocrdoc lays its text layer over the input's pages and leaves their pictures
+as they are.
+
+**semdoc** finds medical terms (lexterm) and identifying information (lexident) in a
+reading, with their spans and boxes and codes, for a person to confirm (`<stem>.semdoc`
+holds the proposals and the decisions). It waits for lexterm and lexident to be libraries.
+
+**tagdoc** sets a document's metadata from its reading and annotations, for a person to
+confirm, and writes them into the PDF (XMP) and beside it. Its vocabulary (medRDS, FHIR
+`DocumentReference`) is to be settled with medorello.
+
+**The core, doccor,** holds what all tools share: the configuration document (head, SHA-256, frame,
+rounding, embedding in a PDF, the deterministic file identifier), the command line's
+manners (exactly one JSON answer, kinds of error with messages in English and German,
+progress lines), the network lock and ONNX Runtime's telemetry switched off, settings, and
+the window's building blocks (page view, background work, words in two languages, the
+frame with Apply, Save and continue later, Cancel).
+
+**reprodoc** joins them: the chain and its document, `reprodoc run` and `reprodoc edit`,
+one window whose tabs come from the tools installed (a tool that is missing leaves its tab
+out), and the standalone program: one Python with every tool inside, called as
+`reprodoc optdoc …`, `reprodoc ocrdoc …` or as a whole, so that a records app ships one
+program, not four of 160 MB each.
+
+## The command lines
+
+Every tool alike:
+
+```
+<tool> run  <input> --out <folder> [--config <doc>] [settings] [--progress]
+<tool> edit <input> --out <folder> [--config <doc>] [settings] [--language de|en]
+<tool> about
+```
+
+`run` makes the result (today's `prepare`), `edit` opens the tool's window (Apply writes
+the result, Save and continue later the configuration document alone, Cancel nothing),
+`about` says what the installation can do (today's `readers`). Everything else as optdoc
+does it today: one JSON answer, status 0 or 2, nothing outside `--out`, never the network,
+no path or content in any message. `--config` takes the configuration document or a PDF
+the tool wrote. reprodoc adds `reprodoc run|edit <original>` for the whole way.
+
+## Models as an optional download
+
+Some steps become better with a model (finding areas: PP-DocLayout; handwriting; turning a
+page upright). Models are planned in from the start and never fetched while a document is
+being worked on:
+
+- A tool lists the models it can use, each with its address, SHA-256, size and licence,
+  in its own code (`<tool> about`).
+- **One command goes on the network**, and only on a person's request:
+  `<tool> models fetch <name> --to <folder>`; it checks the SHA-256 before it keeps a file.
+  A records app may fetch the file itself from the same list.
+- `run` and `edit` take `--models <folder>` and stay without network; a model that is
+  missing is no error, the step works as without it.
+- What a model found is stored in the configuration document like OCR's words, so that a
+  reproduction needs the model no more.
+
+## Formats
+
+| format | from | replaces |
+|---|---|---|
+| `optdoc-config` version 2 | optdoc | version 1, without the steps that move to ocrdoc |
+| `ocrdoc-config` version 1 | ocrdoc | the OCR part of `optdoc-config` 1 |
+| `ocrdoc-reading` version 1 | ocrdoc | `optdoc-reading` 1, unchanged in content |
+| `semdoc-annotations` version 1 | semdoc | — |
+| `tagdoc-config` version 1 | tagdoc | — |
+| `reprodoc-chain` version 1 | reprodoc | — |
+
+The old formats go when the new ones come (no compatibility layer); optdoc 0.6.0 stays
+available for whoever has not moved yet.
+
+## Repositories
+
+- **optdoc** keeps its repository and history, trimmed to the preparation.
+- **ocrdoc** comes out of optdoc with the history of its modules (`git filter-repo`), as
+  optdoc came out of PseudonyMed.
+- **doccor** and **reprodoc** are new repositories; doccor's code moves out of optdoc.
+- **semdoc** and **tagdoc** follow later.
+
+All AGPL-3.0, the core too: code that two applications share is application code (the
+user's rule; MIT is for what a program takes from a standard).
+
+## Order of work
+
+Each stage is released and tested before the next; each keeps the chain reproducible.
+
+1. **doccor**, out of optdoc; optdoc depends on it; nothing else changes.
+2. **ocrdoc**, out of optdoc: the recognition moves, optdoc's output keeps its colours,
+   the configuration documents `.optdoc.json` and `.ocrdoc.json`, the frame rule, `run`,
+   `edit`, `about`. The tests check that original + `.optdoc.json` + `.ocrdoc.json` give the same files.
+3. **reprodoc**: the chain document, the joined window, the one program; a handoff to
+   medorello (from `optdoc edit` to `reprodoc edit`) and to PseudonyMed (imports from
+   ocrdoc and optdoc, the window's panels).
+4. **Models** as an optional download (areas, handwriting, orientation), each measured
+   against the rules it would replace.
+5. **semdoc**, once lexterm and lexident are libraries; then **tagdoc**.
+
+## Decided (the user, 26 November 2026)
+
+- The names stay as they are: optdoc, ocrdoc, semdoc, tagdoc, reprodoc; the core is
+  **doccor** (its .org domain is free). A first check found no live mark against any of
+  them (DPMAregister: DE, EU and international marks with German effect; TMview and the US
+  register not yet); semdoc and reprodoc share their names with projects in other fields.
+- The configuration documents are named `<stem>.<tool>.json` ("clearer, more honest").
+- Every tool's verbs are `run`, `edit` and `about`.

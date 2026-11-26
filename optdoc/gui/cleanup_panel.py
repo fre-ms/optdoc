@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from doccor.gui.view import PREVIEW_DPI, PageView
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QImage, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
@@ -29,7 +30,6 @@ from PySide6.QtWidgets import (
 
 from optdoc import cleanup
 from optdoc.errors import describe_error
-from optdoc.gui.view import PREVIEW_DPI, PageView
 from optdoc.gui.words import Words
 from optdoc.project import Project
 

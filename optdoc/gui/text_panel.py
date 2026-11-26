@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from doccor.gui.view import PREVIEW_DPI, YELLOW, PageView
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
@@ -24,7 +25,6 @@ from PySide6.QtWidgets import (
 )
 
 from optdoc import ocr as ocrlib
-from optdoc.gui.view import PREVIEW_DPI, YELLOW, PageView
 from optdoc.gui.words import Words
 from optdoc.project import Project
 

@@ -14,8 +14,9 @@ from pathlib import Path
 
 import pymupdf
 import pytest
+from doccor import offline
 
-from optdoc import __version__, offline, tables
+from optdoc import __version__, tables
 from optdoc import ocr as ocrlib
 from optdoc.cli import INTERFACE, main
 from optdoc.errors import KINDS
@@ -140,8 +141,8 @@ def test_standard_error_is_optdocs_own() -> None:
     Runtime warns on Linux) and what Python code prints there goes nowhere; optdoc's own
     lines get through, and afterwards standard error is as before."""
     code = ("import os, sys\n"
-            "from optdoc.cli import _own_stderr\n"
-            "with _own_stderr() as said:\n"
+            "from doccor.cli import own_stderr\n"
+            "with own_stderr() as said:\n"
             "    os.write(2, b'native noise\\n')\n"
             "    print('python noise', file=sys.stderr)\n"
             "    said.write('optdoc\\n')\n"
