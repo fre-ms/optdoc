@@ -1,12 +1,14 @@
-"""Image clean-up before OCR: straighten, unwarp, upscale, even out the background.
+"""The preparation of a page: upright, unwarped, straightened, evenly lit, in its own
+colours.
 
-Scans arrive tilted, photos are taken at an angle under uneven light, and both
-are often small.  Every step here is optional, has an automatic suggestion
-and is meant to be checked by eye before the page is read.  The
-steps work on a rendered page (an image); the processed image replaces the
-page, so that OCR, redaction and the output all see the same corrected page.
-Needs OpenCV and NumPy (they come with the ``ocr`` extra); without them only
-masks are available.
+Scans arrive tilted and with dark borders, photos are taken at an angle under uneven
+light.  Every step here is optional, has an automatic suggestion and is meant to be
+checked by eye.  The steps work on a rendered page (an image); the prepared image
+replaces the page.  The page keeps its colours (a stamp, a blue signature, a highlighted
+line stay); a page without colour is stored in grey, which keeps the file small.  What
+only helps OCR read a page (upscaling, a letter mode, taking colour or ruled lines away,
+black and white) is ocrdoc's, on its own copy of the page.  Needs OpenCV and NumPy (the
+extra "cleanup"); without them only masks are available.
 """
 
 from __future__ import annotations
@@ -25,8 +27,8 @@ Rectangle = tuple[float, float, float, float]
 
 
 def available() -> bool:
-    """True when OpenCV and NumPy are installed (they come with the ``ocr`` extra); they
-    are not loaded for that."""
+    """True when OpenCV and NumPy are installed (the extra "cleanup"); they are not
+    loaded for that."""
     return all(importlib.util.find_spec(name) is not None for name in ("cv2", "numpy"))
 
 
@@ -34,48 +36,41 @@ def available() -> bool:
 class CleanupPlan:
     """What to do with one page.  Angles in degrees; corners in points of the source
     page (after ``rotation``), masks as ``(x0, y0, x1, y1)`` in points of the result
-    page (see :func:`replace_page`)."""
+    page (see :func:`cleaned_image`)."""
 
     rotation: int = 0  # 0, 90, 180, 270 clockwise, applied first
     straighten: bool = False  # rotate by -angle
     angle: float = 0.0  # estimated tilt, positive = text runs downhill to the right
     unwarp: bool = False  # perspective correction with ``corners``
     corners: list[Corner] | None = None  # four corners of the page in the (rotated) image
-    upscale: int = 1  # 1 to 4: OCR reads the page at that multiple of the resolution
-    letter_mode: bool = False  # letter-aware upscaling: Lanczos enlargement, sharpened strokes
     borders: bool = False  # dark scanner borders -> white
-    remove_colour: bool = False  # coloured ink (stamps, highlighter) -> white
     denoise: bool = False  # median plus non-local means against specks and grain
     denoise_strength: int = 2  # 1 (gentle) to 5 (strong)
     contrast: bool = False  # CLAHE on faint copies
     contrast_strength: int = 2  # 1 to 5
     sharpen: bool = False  # unsharp mask
     sharpen_strength: int = 2  # 1 to 5
-    background: bool = False  # even out illumination, white paper
-    remove_lines: bool = False  # long ruled and table lines -> white
-    black_white: bool = False  # binarise after that
+    background: bool = False  # even out illumination per colour channel, white paper
     masks: list[Rectangle] = field(default_factory=list)  # regions to wipe, result page points
     mask_colour: str = "white"  # "white" erases (clean-up step), "black" redacts
+    grey: bool = False  # the page has no colour: stored in grey (smaller), when it is redrawn
 
     @property
     def active(self) -> bool:
-        """True when at least one step would run, so that the page would change."""
-        # the factor's resting value 1 is truthy but changes nothing
-        return self.upscale > 1 or any(
-            getattr(self, switch) for switch, _ in _STEPS if switch != "upscale")
+        """True when at least one step would run, so that the page would change.  Grey is
+        no step: it says how a page that is redrawn anyway is stored."""
+        return any(getattr(self, switch) for switch, _ in _STEPS)
 
     def as_dict(self) -> dict[str, Any]:
         """The plan for the report: every switch and strength, the masks only counted."""
         return {"rotation": self.rotation, "straighten": self.straighten,
                 "angle": round(self.angle, 2), "unwarp": self.unwarp,
-                "upscale": self.upscale, "letter_mode": self.letter_mode,
-                "borders": self.borders, "remove_colour": self.remove_colour,
+                "borders": self.borders,
                 "denoise": self.denoise, "denoise_strength": self.denoise_strength,
                 "contrast": self.contrast, "contrast_strength": self.contrast_strength,
                 "sharpen": self.sharpen, "sharpen_strength": self.sharpen_strength,
                 "background": self.background,
-                "remove_lines": self.remove_lines, "black_white": self.black_white,
-                "masks": len(self.masks), "mask_colour": self.mask_colour}
+                "masks": len(self.masks), "mask_colour": self.mask_colour, "grey": self.grey}
 
     def full_dict(self) -> dict[str, Any]:
         """Every field, masks and corners included (the working state)."""
@@ -107,7 +102,7 @@ def _numbers(value: Any, count: int) -> bool:
 
 
 _RANGES: dict[str, tuple[Any, ...]] = {
-    "rotation": (0, 90, 180, 270), "upscale": (1, 2, 3, 4), "mask_colour": ("white", "black"),
+    "rotation": (0, 90, 180, 270), "mask_colour": ("white", "black"),
     **{k: (1, 2, 3, 4, 5) for k in ("denoise_strength", "contrast_strength", "sharpen_strength")},
 }
 
@@ -611,29 +606,16 @@ def uneven_background(image: Any) -> bool:
     return bool(np.std(background) > 12 or np.median(background) < 215)
 
 
-def native_dpi(page: pymupdf.Page) -> float | None:
-    """Resolution of the largest image on the page, or None without images."""
-    best: float | None = None
-    for info in page.get_image_info():
-        bbox = pymupdf.Rect(info["bbox"]) & page.rect
-        if bbox.width < 20 or bbox.height < 20:
-            continue
-        dpi = info["width"] / (bbox.width / 72.0)
-        if best is None or dpi > best:
-            best = dpi
-    return best
-
-
 STRAIGHTEN_FROM = 0.3  # degrees of tilt the suggestion straightens (see suggest)
+COLOUR_FROM = 0.003  # share of clearly coloured pixels from which a page keeps its colours
 
 
-def suggest(image: Any, photo: bool | None = None, scale: float = 1.0,
-              resolution: float | None = None) -> CleanupPlan:
+def suggest(image: Any, photo: bool | None = None, scale: float = 1.0) -> CleanupPlan:
     """Automatic suggestion for one page: straighten a visible tilt, unwarp a
-    photographed sheet, upscale low-resolution images, even out an uneven background.
-    ``photo`` True takes the page for a photo (the sheet is looked for and unwarped),
-    False for a scan, None tells by the page itself (:func:`sheet_in_photo`).
-    ``scale`` is pixels per point of ``image``, ``resolution`` the native dpi."""
+    photographed sheet, even out an uneven background, keep the colours where the page
+    has any (grey otherwise).  ``photo`` True takes the page for a photo (the sheet is
+    looked for and unwarped), False for a scan, None tells by the page itself
+    (:func:`sheet_in_photo`).  ``scale`` is pixels per point of ``image``."""
     a = CleanupPlan()
     if photo is None:
         corners = sheet_in_photo(image, scale)
@@ -649,11 +631,11 @@ def suggest(image: Any, photo: bool | None = None, scale: float = 1.0,
     # straightened, 101 to 108, while the numbers read stayed within a few of 306 either
     # way (better at 1 degree, a little worse at 0.5); below 0.3 degrees all is well
     a.straighten = abs(a.angle) >= STRAIGHTEN_FROM
-    a.upscale = 2 if resolution is not None and resolution < 150 else 1
-    a.letter_mode = False  # measured: no gain over plain enlargement, so an explicit choice
     a.background = bool(photo) or a.unwarp or uneven_background(basis)
     a.borders = dark_borders(basis)
-    a.remove_colour = colour_share(basis) > 0.003
+    # where optdoc once took coloured ink away (more than 0.3 % of the page in colour), it
+    # now keeps the colours; a page with less is stored in grey
+    a.grey = colour_share(basis) <= COLOUR_FROM
     a.denoise = noise_share(basis) > 0.35
     return a
 
@@ -663,22 +645,17 @@ def suggest(image: Any, photo: bool | None = None, scale: float = 1.0,
 _WORDS: dict[str, dict[str, str]] = {
     "en": {
         "rotation": "rotated by {rotation}°", "unwarp": "unwarped",
-        "straighten": "straightened ({angle:+.1f}°)", "upscale": "upscaled {upscale}×",
-        "letter_mode": "letter mode", "borders": "borders cleaned",
-        "remove_colour": "coloured ink removed", "denoise": "denoised",
-        "contrast": "contrast raised", "sharpen": "sharpened", "background": "background evened",
-        "remove_lines": "lines removed", "black_white": "black and white",
+        "straighten": "straightened ({angle:+.1f}°)", "borders": "borders cleaned",
+        "denoise": "denoised", "contrast": "contrast raised", "sharpen": "sharpened",
+        "background": "background evened", "grey": "in grey",
         "masks_white": "{n} region(s) erased", "masks_black": "{n} region(s) redacted",
         "unchanged": "unchanged", "decimal": ".",
     },
     "de": {
         "rotation": "um {rotation}° gedreht", "unwarp": "entzerrt",
-        "straighten": "begradigt ({angle:+.1f}°)", "upscale": "{upscale}× hochskaliert",
-        "letter_mode": "Buchstabenmodus", "borders": "Ränder gesäubert",
-        "remove_colour": "farbige Tinte entfernt", "denoise": "entrauscht",
-        "contrast": "Kontrast angehoben", "sharpen": "geschärft",
-        "background": "Hintergrund geglättet", "remove_lines": "Linien entfernt",
-        "black_white": "Schwarz-Weiß",
+        "straighten": "begradigt ({angle:+.1f}°)", "borders": "Ränder gesäubert",
+        "denoise": "entrauscht", "contrast": "Kontrast angehoben", "sharpen": "geschärft",
+        "background": "Hintergrund geglättet", "grey": "in Graustufen",
         "masks_white": "{n} Bereich(e) gelöscht", "masks_black": "{n} Bereich(e) geschwärzt",
         "unchanged": "unverändert", "decimal": ",",
     },
@@ -698,19 +675,6 @@ def _phrase_straightened(a: CleanupPlan, w: dict[str, str]) -> str | None:
     return w["straighten"].format(angle=a.angle).replace(".", w["decimal"])
 
 
-def _phrase_upscaled(a: CleanupPlan, w: dict[str, str]) -> str | None:
-    """The factor, with the letter mode in brackets; nothing at factor 1."""
-    if a.upscale <= 1:
-        return None
-    return w["upscale"].format(upscale=a.upscale) + (
-        f" ({w['letter_mode']})" if a.letter_mode else "")
-
-
-def _phrase_letter_mode(a: CleanupPlan, w: dict[str, str]) -> str | None:
-    """The letter mode on its own, unless the upscaling phrase has mentioned it already."""
-    return w["letter_mode"] if a.upscale <= 1 else None
-
-
 def _phrase_masks(a: CleanupPlan, w: dict[str, str]) -> str:
     """The number of regions and whether they are erased or redacted."""
     key = "masks_white" if a.mask_colour == "white" else "masks_black"
@@ -725,16 +689,11 @@ _PHRASES: tuple[tuple[str, Phrase], ...] = (
     ("rotation", None),
     ("unwarp", _phrase_unwarped),
     ("straighten", _phrase_straightened),
-    ("upscale", _phrase_upscaled),
-    ("letter_mode", _phrase_letter_mode),
     ("borders", None),
-    ("remove_colour", None),
     ("denoise", None),
     ("contrast", None),
     ("sharpen", None),
     ("background", None),
-    ("remove_lines", None),
-    ("black_white", None),
     ("masks", _phrase_masks),
 )
 
@@ -752,6 +711,8 @@ def describe(a: CleanupPlan, language: str = "en") -> str:
     German (``"de"``)."""
     w = _WORDS.get(language, _WORDS["en"])
     parts = [t for t in (_phrase(a, switch, phrase, w) for switch, phrase in _PHRASES) if t]
+    if parts and a.grey:
+        parts.append(w["grey"])
     return ", ".join(parts) if parts else w["unchanged"]
 
 
@@ -892,22 +853,6 @@ def _clean_borders(image: Any, limit: int = 90, maximum: float = 0.15) -> Any:
     return out
 
 
-def _remove_colour(image: Any) -> Any:
-    """Coloured ink (stamps, highlighter, signatures in blue) becomes white; black and
-    grey print stays.  Returns a grey image."""
-    import cv2
-    import numpy as np
-
-    if image.ndim != 3:
-        return image
-    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-    coloured = (hsv[:, :, 1] > 70) & (hsv[:, :, 2] > 60)
-    coloured = cv2.dilate(coloured.astype(np.uint8), np.ones((3, 3), np.uint8), iterations=1) > 0
-    grey = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    grey[coloured] = 255
-    return grey
-
-
 def _denoise(image: Any, strength: int = 2) -> Any:
     """Median against isolated specks (dust, salt-and-pepper), then non-local means
     against grain; both keep the strokes of letters.  Strength 1 to 5."""
@@ -943,91 +888,22 @@ def _sharpen(image: Any, strength: int = 2) -> Any:
     return cv2.addWeighted(image, 1.0 + amount, blurred, -amount, 0)
 
 
-def letter_finish(grey: Any, factor: int = 2) -> Any:
-    """Letter-aware finish for an upscaled (or large) rendering: grey, strokes sharpened.
-
-    Measured on synthetic scans (RapidOCR): a hard local threshold (Sauvola) after the
-    enlargement looked crisp but wrecked the recognition (down to 0.0 on a noisy
-    150-dpi scan), whereas Lanczos enlargement plus unsharp masking in grey scale
-    matched or beat the plain enlargement.  The recogniser wants grey, not binary.
-    """
-    return _sharpen(_grey(grey), 2)
-
-
-def _upscale(image: Any, factor: int, letter_mode: bool) -> Any:
-    import cv2
-
-    if letter_mode:
-        grey = _grey(image)
-        large = cv2.resize(grey, None, fx=factor, fy=factor, interpolation=cv2.INTER_LANCZOS4)
-        return letter_finish(large, factor)
-    return cv2.resize(image, None, fx=factor, fy=factor, interpolation=cv2.INTER_CUBIC)
-
-
-def _remove_lines(image: Any) -> Any:
-    """Long horizontal and vertical lines (forms, tables, underlines) become white;
-    letters are far shorter than the kernels and survive."""
-    import cv2
-    import numpy as np
-
-    grey = _grey(image)
-    h, w = grey.shape
-    _, bw = cv2.threshold(grey, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-    horizontal = cv2.morphologyEx(bw, cv2.MORPH_OPEN, cv2.getStructuringElement(
-        cv2.MORPH_RECT, (max(30, w // 25), 1)))
-    vertical = cv2.morphologyEx(bw, cv2.MORPH_OPEN, cv2.getStructuringElement(
-        cv2.MORPH_RECT, (1, max(30, h // 25))))
-    rules = cv2.dilate(cv2.bitwise_or(horizontal, vertical), np.ones((3, 3), np.uint8))
-    out = image.copy()
-    out[rules > 0] = (255, 255, 255) if out.ndim == 3 else 255
-    return out
-
-
-def grid_areas(image: Any) -> list[tuple[int, int, int, int]]:
-    """Pixel boxes of table grids: connected long horizontal and vertical rules that
-    together span at least 15 % of the width and 2 % of the height.  Tesseract's page
-    segmentation treats such a grid as graphics and drops the cells; the OCR reads the
-    boxes again without their lines (:class:`~optdoc.ocr.TesseractBackend`)."""
-    import cv2
-
-    grey = _grey(image)
-    h, w = grey.shape
-    _, bw = cv2.threshold(grey, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-    horizontal = cv2.morphologyEx(bw, cv2.MORPH_OPEN, cv2.getStructuringElement(
-        cv2.MORPH_RECT, (max(20, w // 25), 1)))
-    vertical = cv2.morphologyEx(bw, cv2.MORPH_OPEN, cv2.getStructuringElement(
-        cv2.MORPH_RECT, (1, max(20, h // 40))))
-    rules = cv2.dilate(cv2.bitwise_or(horizontal, vertical), cv2.getStructuringElement(
-        cv2.MORPH_RECT, (5, 5)))
-    n, _labels, stats, _ = cv2.connectedComponentsWithStats(rules, connectivity=8)
-    areas: list[tuple[int, int, int, int]] = []
-    for i in range(1, n):
-        x, y, bb, bh, _area = (int(v) for v in stats[i])
-        if bb < w * 0.15 or bh < h * 0.02:
-            continue
-        if not cv2.countNonZero(horizontal[y:y + bh, x:x + bb]) or \
-                not cv2.countNonZero(vertical[y:y + bh, x:x + bb]):
-            continue  # a lone rule or a bar, not a grid
-        areas.append((x, y, x + bb, y + bh))
-    return areas
-
-
-def without_lines(image: Any) -> Any:
-    """Public wrapper: the image with long rules removed (see :func:`_remove_lines`)."""
-    return _remove_lines(image)
-
-
 def _background(image: Any) -> Any:
-    """Divide by the blurred background: shadows and grey paper become white, ink stays."""
+    """Divide every colour channel by its blurred background: shadows, a yellowish light
+    and grey paper become white, ink keeps its colour (a red stamp stays red)."""
     import cv2
     import numpy as np
 
-    grey = _grey(image)
-    k = max(31, (min(grey.shape) // 20) | 1)
-    after = cv2.medianBlur(grey, k)
-    after = np.maximum(after, 1)
-    norm = cv2.divide(grey.astype(np.float32), after.astype(np.float32), scale=255.0)
-    return np.clip(norm, 0, 255).astype(np.uint8)
+    k = max(31, (min(image.shape[:2]) // 20) | 1)
+
+    def evened(channel: Any) -> Any:
+        after = np.maximum(cv2.medianBlur(channel, k), 1)
+        norm = cv2.divide(channel.astype(np.float32), after.astype(np.float32), scale=255.0)
+        return np.clip(norm, 0, 255).astype(np.uint8)
+
+    if image.ndim == 2:
+        return evened(image)
+    return cv2.merge([evened(c) for c in cv2.split(image)])
 
 
 Step = Callable[[Any, CleanupPlan, float], Any]
@@ -1045,8 +921,8 @@ def _with_strength(op: Callable[[Any, int], Any], switch: str) -> Step:
 
 def geometry_only(a: CleanupPlan) -> CleanupPlan:
     """What of a plan moves the page (turning, unwarping, straightening), and nothing
-    else: the page where everything on it lies once cleaned up, in its own colours (the
-    areas of a page are looked for in it, :mod:`optdoc.areas`)."""
+    else: where everything on the page lies once it is prepared (its frame,
+    :func:`frame`)."""
     return CleanupPlan(rotation=a.rotation, unwarp=a.unwarp,
                        corners=None if a.corners is None else list(a.corners),
                        straighten=a.straighten, angle=a.angle)
@@ -1091,32 +967,14 @@ def _step_straighten(image: Any, a: CleanupPlan, scale: float) -> Any:
     return image
 
 
-def _step_upscale(image: Any, a: CleanupPlan, scale: float) -> Any:
-    """Enlarge by the factor, letter-aware in letter mode; factor 1 changes nothing."""
-    return _upscale(image, a.upscale, a.letter_mode) if a.upscale > 1 else image
-
-
-def _step_letter_mode(image: Any, a: CleanupPlan, scale: float) -> Any:
-    """The letter-mode finish without enlargement, unless the upscaling applied it already."""
-    return letter_finish(image, 1) if a.upscale <= 1 else image
-
-
 def _step_sharpen(image: Any, a: CleanupPlan, scale: float) -> Any:
-    """Unsharp mask, unless the letter mode has sharpened already."""
-    return image if a.letter_mode else _sharpen(image, a.sharpen_strength)
+    """Unsharp mask at the plan's strength."""
+    return _sharpen(image, a.sharpen_strength)
 
 
 def _step_background(image: Any, a: CleanupPlan, scale: float) -> Any:
-    """Even out the illumination; not in letter mode, which keeps its grey as it is."""
-    return image if a.letter_mode else _background(image)
-
-
-def _step_black_white(image: Any, a: CleanupPlan, scale: float) -> Any:
-    """Adaptive threshold to pure black and white; never in letter mode (measured: worse OCR)."""
-    import cv2
-
-    return image if a.letter_mode else cv2.adaptiveThreshold(
-        _grey(image), 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 15)
+    """Even out the illumination, per colour channel."""
+    return _background(image)
 
 
 def _step_masks(image: Any, a: CleanupPlan, scale: float) -> Any:
@@ -1139,24 +997,18 @@ _STEPS: tuple[tuple[str, Step], ...] = (
     ("borders", _image_only(_clean_borders)),
     ("unwarp", _step_unwarp),
     ("straighten", _step_straighten),
-    ("remove_colour", _image_only(_remove_colour)),
     ("denoise", _with_strength(_denoise, "denoise_strength")),
     ("contrast", _with_strength(_contrast, "contrast_strength")),
-    ("upscale", _step_upscale),
-    ("letter_mode", _step_letter_mode),
     ("sharpen", _step_sharpen),
     ("background", _step_background),
-    ("remove_lines", _image_only(_remove_lines)),
-    ("black_white", _step_black_white),
     ("masks", _step_masks),
 )
 
 
 def apply_plan(image: Any, a: CleanupPlan, scale: float = 1.0) -> Any:
     """Apply the steps in their fixed order: rotate, clean borders, unwarp, straighten,
-    drop colour, denoise, contrast, upscale (letter mode), sharpen, background, lines,
-    black-and-white, masks.  ``scale`` is pixels per point of ``image`` (corners) and
-    of the result (masks)."""
+    denoise, contrast, sharpen, background, masks.  ``scale`` is pixels per point of
+    ``image`` (corners) and of the result (masks)."""
     import numpy as np
 
     out = image
@@ -1164,6 +1016,9 @@ def apply_plan(image: Any, a: CleanupPlan, scale: float = 1.0) -> Any:
         if getattr(a, switch):
             out = step(out, a, scale)
     return np.ascontiguousarray(out)
+
+
+JPEG_QUALITY = 92  # a page in colour: a photo or a colour scan came as JPEG already
 
 
 def as_png(image: Any) -> bytes:
@@ -1176,67 +1031,64 @@ def as_png(image: Any) -> bytes:
     return bytes(buffer)
 
 
-def _process(page: pymupdf.Page, a: CleanupPlan, dpi: int,
-                with_upscaling: bool = True) -> tuple[Any, float, float]:
-    """Processed image of ``page``, its width in points and its pixels per point."""
+COLOUR_PAGES = ("jpeg", "png")  # how a page in colour is stored; the first is the default
+
+
+def encoded(image: Any, colour_pages: str = "jpeg") -> bytes:
+    """The prepared page as the PDF stores it: a grey page as PNG (lossless and small, a
+    scan of print); a page in colour by default as JPEG at quality 92 with full colour
+    resolution (4:4:4, so that a red stamp keeps its edges), or losslessly as PNG
+    (``colour_pages`` "png"; some ten times the size).  The same image gives the same
+    bytes with the same OpenCV.  (TIFF is no choice: a PDF holds no TIFF; a TIFF given to
+    it is stored exactly as a PNG.)"""
+    import cv2
+
+    if image.ndim == 2 or colour_pages == "png":
+        return as_png(image)
+    ok, buffer = cv2.imencode(".jpg", image, [
+        cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY,
+        cv2.IMWRITE_JPEG_SAMPLING_FACTOR, cv2.IMWRITE_JPEG_SAMPLING_FACTOR_444])
+    if not ok:
+        raise OptdocError("clean-up-failed")
+    return bytes(buffer)
+
+
+def _process(page: pymupdf.Page, a: CleanupPlan, dpi: int) -> tuple[Any, float, float]:
+    """Processed image of ``page`` (grey where the plan says so), its width in points and
+    its pixels per point."""
     image, scale = render(page, dpi)
-    steps = CleanupPlan(**{**a.__dict__, "masks": [],
-                               "upscale": a.upscale if with_upscaling else 1})
-    out = apply_plan(image, steps, scale)
+    out = apply_plan(image, CleanupPlan(**{**a.__dict__, "masks": []}), scale)
     width = page.rect.width if a.rotation in (0, 180) else page.rect.height
     new_scale = out.shape[1] / width
     if a.masks:
         out = apply_plan(out, CleanupPlan(masks=a.masks), new_scale)
+    if a.grey:
+        out = _grey(out)
     return out, width, new_scale
 
 
-def cleaned_image(page: pymupdf.Page, a: CleanupPlan, dpi: int = 300) -> tuple[bytes, float, float]:
-    """The page cleaned up by ``a`` as PNG, and the width and height in points of the
-    page that shows it: the width of the page (of its other side after a quarter turn),
-    the height following the image."""
-    # upscaling is not baked into the page (no information gained, the file would bloat);
-    # the pipeline renders such pages for OCR at the higher resolution instead
-    out, width, new_scale = _process(page, a, dpi, with_upscaling=False)
-    return as_png(out), width, out.shape[0] / new_scale
+def cleaned_image(page: pymupdf.Page, a: CleanupPlan, dpi: int = 300,
+                  colour_pages: str = "jpeg") -> tuple[bytes, float, float]:
+    """The page prepared by ``a`` as the PDF stores it (:func:`encoded`), and the width and
+    height in points of the page that shows it: the width of the page (of its other side
+    after a quarter turn), the height following the image."""
+    out, width, new_scale = _process(page, a, dpi)
+    return encoded(out, colour_pages), width, out.shape[0] / new_scale
 
 
-def put_page_image(doc: pymupdf.Document, number: int, png: bytes, width: float,
+def put_page_image(doc: pymupdf.Document, number: int, image: bytes, width: float,
                    height: float) -> None:
     """Replace page ``number`` of ``doc`` by a page of ``width`` × ``height`` points
-    showing ``png``."""
+    showing ``image`` (PNG or JPEG; a JPEG is stored as it is)."""
     new = doc.new_page(pno=number, width=width, height=height)
-    new.insert_image(new.rect, stream=png)
+    new.insert_image(new.rect, stream=image)
     doc.delete_page(number + 1)
 
 
-def replace_pages(docs: list[pymupdf.Document], number: int, a: CleanupPlan,
-                    dpi: int = 300) -> float:
-    """Replace page ``number`` in every document of ``docs`` (copies of the same file)
-    by its processed image, rendered once from the first.  The page keeps its width
-    in points; the height follows the image.  Returns the pixels per point of the
-    new page."""
-    png, width, height = cleaned_image(docs[0][number], a, dpi)
-    for doc in docs:
-        put_page_image(doc, number, png, width, height)
-    return docs[0][number].get_image_info()[0]["width"] / width
-
-
-def replace_page(doc: pymupdf.Document, number: int, a: CleanupPlan, dpi: int = 300) -> float:
-    """:func:`replace_pages` for a single document."""
-    return replace_pages([doc], number, a, dpi)
-
-
-def preview_png(page: pymupdf.Page, a: CleanupPlan, dpi: int = 100,
-                 max_pixel: int = 3000) -> tuple[bytes, float]:
+def preview_png(page: pymupdf.Page, a: CleanupPlan, dpi: int = 100) -> tuple[bytes, float]:
     """The processed page as PNG for the before/after view, masks included, and its
-    pixels per point.  Upscaling is shown: the rendering resolution is lowered so that
-    the enlarged image stays below ``max_pixel`` on its long side; the view scales it
-    back to the size of the original, so zooming in reveals the gain."""
-    f = max(1, a.upscale)
-    if f > 1:
-        long = max(page.rect.width, page.rect.height) / 72.0  # inches
-        dpi = max(36, min(dpi, int(max_pixel / (f * long))))
-    out, _width, scale = _process(page, a, dpi, with_upscaling=True)
+    pixels per point."""
+    out, _width, scale = _process(page, a, dpi)
     return as_png(out), scale
 
 

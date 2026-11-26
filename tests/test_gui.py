@@ -1,6 +1,5 @@
-"""The window, driven without a screen: the clean-up changes the project's plans, the
-text panel its corrections, and the three ways out end as they say; the words are there
-in both languages."""
+"""The window, driven without a screen: the preparation changes the project's plans, and
+the three ways out end as they say; the words are there in both languages."""
 
 from __future__ import annotations
 
@@ -11,7 +10,6 @@ from pathlib import Path
 import pytest
 
 from optdoc import cleanup
-from optdoc import ocr as ocrlib
 from optdoc.project import Project
 from tests.synthetic import scan
 
@@ -22,8 +20,6 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 from optdoc.gui.window import EditWindow  # noqa: E402
 from optdoc.gui.words import WORDS, Words  # noqa: E402
 
-needs_backend = pytest.mark.skipif(not ocrlib.available_backends(),
-                                   reason="no OCR engine installed")
 needs_opencv = pytest.mark.skipif(not cleanup.available(), reason="needs OpenCV")
 
 
@@ -55,16 +51,16 @@ def test_words_in_both_languages() -> None:
 
 
 @needs_opencv
-def test_clean_up_by_hand(app: QApplication, scanned: Path) -> None:
+def test_prepare_by_hand(app: QApplication, scanned: Path) -> None:
     """Switches, masks, rotation, the suggestion and copying to every page go into the
-    project's plans."""
+    project's plans, marked as a person's; the suggestion taken back is optdoc's again."""
     project = Project.open(scanned)
     window = EditWindow(project, Words("de"), synchronous=True)
     try:
         panel = window.cleanup
-        assert panel.boxes["straighten"].isChecked()  # the suggestion is shown
+        assert panel.boxes["straighten"].isChecked() and panel.boxes["grey"].isChecked()
         panel.boxes["contrast"].setChecked(True)
-        assert project.plan(0).contrast and project.pages[0].decided
+        assert project.plan(0).contrast and project.decided_by_person == [0]
         panel.add_mask((10, 10, 60, 40))
         panel.add_mask((80, 10, 120, 40))
         panel.undo()
@@ -77,6 +73,7 @@ def test_clean_up_by_hand(app: QApplication, scanned: Path) -> None:
         assert project.active_plan(0) is None and window.changed
         panel.restore()
         assert project.plan(0).straighten and not project.plan(0).contrast
+        assert project.decided_by_person == [1]  # page 1 is optdoc's suggestion again
         assert "begradigt" in panel.note.text()
     finally:
         window.outcome = "cancelled"
@@ -84,48 +81,14 @@ def test_clean_up_by_hand(app: QApplication, scanned: Path) -> None:
         project.close()
 
 
-@needs_backend
-def test_correct_the_text_and_apply(app: QApplication, scanned: Path) -> None:
-    """A correction typed into the text goes into the project on leaving the page; back to
-    the OCR text takes it back; a click on a printed word selects it; apply reads every
-    page and closes as "applied"."""
-    project = Project.open(scanned)
-    window = EditWindow(project, Words("en"), synchronous=True)
-    try:
-        window.tabs.setCurrentWidget(window.text)
-        panel = window.text
-        original = panel.text.toPlainText()
-        assert "Ramipril" in original and not panel.text.isReadOnly()
-        ocr = project.ocr_text(0)
-        a = ocr.text.index("Ramipril")
-        box = ocr.rects(a, a + 8)[0]
-        panel.select_word_at((box.x0 + box.x1) / 2, (box.y0 + box.y1) / 2)
-        assert panel.text.textCursor().selectedText() == "Ramipril"
-        panel.text.setPlainText(original.replace("Ramipril", "Ramiprill"))
-        window.pages.setCurrentRow(1)  # leaving the page keeps the correction
-        assert project.corrected == [0]
-        assert window.pages.item(0).text() == "Page 1 ✎"
-        window.pages.setCurrentRow(0)
-        assert "Ramiprill" in panel.text.toPlainText() and panel.note.text().startswith("corrected")
-        panel.reset_text()
-        assert project.corrected == [] and panel.text.toPlainText() == original
-        panel.text.setPlainText(original.replace("Ramipril", "Ramiprill"))
-        window.apply()
-        assert window.outcome == "applied" and project.corrected == [0]
-        assert not any(project.needs_reading(n) for n in range(len(project.pages)))
-    finally:
-        project.close()
-
-
 def test_later_and_cancel(app: QApplication, report: Path) -> None:
     """Save and continue later closes as "saved", cancel as "cancelled"; a born-digital PDF
-    opens on the text, which cannot be changed."""
+    has nothing to prepare."""
     for button, outcome in (("later_button", "saved"), ("cancel_button", "cancelled")):
         project = Project.open(report)
         window = EditWindow(project, Words("de"), synchronous=True)
         try:
-            assert window.tabs.currentWidget() is window.text
-            assert window.text.text.isReadOnly() and "Ramipril" in window.text.text.toPlainText()
+            assert not window.cleanup.controls.isEnabled()
             getattr(window, button).click()
             assert window.outcome == outcome
         finally:
@@ -177,81 +140,6 @@ def test_corners_dragged_and_turned(app: QApplication, tmp_path: Path, report: P
         assert "Ecken" in panel.note.text()
         panel.before.move_corner(2, 400, 600)
         assert project.plan(0).unwarp and project.plan(0).corners[2] == pytest.approx((400, 600))
-    finally:
-        window.outcome = "cancelled"
-        window.close()
-        project.close()
-
-
-def _click(view, x: float, y: float, drag_to: tuple[float, float] | None = None) -> None:
-    """A click (or a drag) with the mouse at page points ``(x, y)`` of a view."""
-    from PySide6.QtCore import QPointF
-    from PySide6.QtTest import QTest
-
-    def at(px: float, py: float):
-        return view.mapFromScene(QPointF(px * view.scale_factor, py * view.scale_factor))
-
-    QTest.mousePress(view.viewport(), Qt.MouseButton.LeftButton, pos=at(x, y))
-    if drag_to is not None:
-        QTest.mouseMove(view.viewport(), at((x + drag_to[0]) / 2, (y + drag_to[1]) / 2))
-        QTest.mouseMove(view.viewport(), at(*drag_to))
-    QTest.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton,
-                       pos=at(*(drag_to or (x, y))))
-
-
-@pytest.mark.skipif(not __import__("optdoc.tables").tables.available(),
-                    reason="needs Camelot (extra 'tables')")
-def test_areas_by_mouse(app: QApplication, tmp_path: Path) -> None:
-    """The areas tab shows the table optdoc found; with the mouse a person adds a column
-    line and takes it away, merges two cells, drags a line, draws a picture and makes it a
-    stamp,
-    deletes the table; each change is in the project at once; finding again brings
-    optdoc's table back."""
-    from optdoc.project import Options
-    from tests.synthetic import lab_report
-
-    pdf, _ = lab_report(tmp_path, 1)
-    project = Project.open(pdf, Options(reader="none"))
-    window = EditWindow(project, Words("en"), synchronous=True)
-    window.resize(1300, 900)
-    window.show()
-    try:
-        window.tabs.setCurrentWidget(window.areas)
-        panel, view = window.areas, window.areas.view
-        assert [r.kind for r in view.regions] == ["table"]
-        table = view.regions[0]
-        x0, y0, x1, y1 = table.box
-        _click(view, x0 + 5, y0 + 5)
-        assert view.selected == 0
-        panel.use_tool("column")
-        middle_of_first = (x0 + table.columns[0]) / 2
-        _click(view, middle_of_first, (y0 + y1) / 2)
-        assert len(project.regions(0)[0].columns) == len(table.columns) + 1
-        assert project.regions_by_person(0)
-        panel.use_tool("remove")
-        _click(view, middle_of_first, (y0 + y1) / 2)
-        assert project.regions(0)[0].columns == pytest.approx(table.columns)
-        panel.use_tool("merge")
-        row_middle = (table.rows[1] + table.rows[2]) / 2
-        _click(view, x0 + 3, row_middle, drag_to=((table.columns[0] + table.columns[1]) / 2,
-                                                  row_middle))
-        assert project.regions(0)[0].merged == [(2, 0, 2, 1)]
-        panel.use_tool("select")  # the table is still selected: drag its last column line
-        last, bottom_row = table.columns[-1], (table.rows[-1] + y1) / 2
-        _click(view, last, bottom_row, drag_to=(last + 12, bottom_row))
-        assert project.regions(0)[0].columns[-1] == pytest.approx(last + 12, abs=1.5)
-        panel.draw("image")
-        _click(view, 400, 760, drag_to=(520, 800))
-        assert [r.kind for r in project.regions(0)] == ["table", "image"]
-        panel.kinds.setCurrentIndex(panel.kinds.findData("stamp"))  # the picture drawn: a stamp
-        assert [r.kind for r in project.regions(0)] == ["table", "stamp"]
-        panel.use_tool("select")
-        _click(view, x0 + 5, y0 + 5)
-        view.delete_selected()
-        assert [r.kind for r in project.regions(0)] == ["stamp"] and window.changed
-        panel.find_again()
-        assert [r.kind for r in project.regions(0)] == ["table"]
-        assert not project.regions_by_person(0)
     finally:
         window.outcome = "cancelled"
         window.close()

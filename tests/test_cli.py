@@ -16,15 +16,13 @@ import pymupdf
 import pytest
 from doccor import offline
 
-from optdoc import __version__, tables
-from optdoc import ocr as ocrlib
+from optdoc import __version__, cleanup
 from optdoc.cli import INTERFACE, main
 from optdoc.errors import KINDS
-from optdoc.project import Options, Project
+from optdoc.project import Project
 from tests.synthetic import scan
 
-needs_backend = pytest.mark.skipif(not ocrlib.available_backends(),
-                                   reason="no OCR engine installed")
+needs_opencv = pytest.mark.skipif(not cleanup.available(), reason="needs OpenCV")
 HEAD = {"interface", "made_with"}
 # a file name as medorello's records have them: a patient's name in the path
 PATIENT = "Mustermann,Erika_1964-08-12_K7Q4MX"
@@ -43,15 +41,25 @@ def _run(argv: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
                           text=True, check=False, **kwargs)
 
 
-def test_readers(capsys: pytest.CaptureFixture[str]) -> None:
-    """What an installation can do, under the names medorello reads."""
-    status, answer, _ = _answer(capsys, ["readers"])
+def _clean_environment(tmp_path: Path) -> tuple[dict[str, str], dict[str, Path]]:
+    """An environment whose temporary, home and cache folders are new and empty."""
+    elsewhere = {name: tmp_path / name for name in ("tmp", "home", "cache")}
+    for folder in elsewhere.values():
+        folder.mkdir()
+    env = {**os.environ, "TMPDIR": str(elsewhere["tmp"]), "TEMP": str(elsewhere["tmp"]),
+           "TMP": str(elsewhere["tmp"]), "HOME": str(elsewhere["home"]),
+           "USERPROFILE": str(elsewhere["home"]), "XDG_CACHE_HOME": str(elsewhere["cache"]),
+           "PYTHONDONTWRITEBYTECODE": "1", "QT_QPA_PLATFORM": "offscreen"}
+    return env, elsewhere
+
+
+def test_about(capsys: pytest.CaptureFixture[str]) -> None:
+    """What an installation can do."""
+    status, answer, _ = _answer(capsys, ["about"])
     assert status == 0
-    assert set(answer) == HEAD | {"version", "readers", "clean_up", "heic", "tables", "window",
-                                  "barcodes"}
+    assert set(answer) == HEAD | {"version", "clean_up", "heic", "window", "upside_down"}
     assert answer["interface"] == INTERFACE and answer["version"] == __version__
     assert answer["made_with"] == f"optdoc {__version__}"
-    assert set(answer["readers"]) <= {"rapidocr", "tesseract"}
 
 
 def _encrypted(path: Path) -> Path:
@@ -83,27 +91,28 @@ def test_failures_by_kind_without_paths(tmp_path: Path, report: Path,
     good = folder / f"{PATIENT}-gut.pdf"
     good.write_bytes(report.read_bytes())
     cases = {
-        "missing": ["prepare", str(folder / "fehlt.pdf")],
-        "unsupported": ["prepare", str(text)],
-        "unreadable": ["prepare", str(damaged)],
-        "encrypted": ["prepare", str(_encrypted(folder / f"{PATIENT}-zu.pdf"))],
-        "paper": ["prepare", str(good), "--paper", "b5"],
-        "usage": ["prepare", str(good), "--unknown", str(folder)],
-        "same-as-source": ["prepare", str(good), "--out", str(folder)],
+        "missing": ["run", str(folder / "fehlt.pdf")],
+        "unsupported": ["run", str(text)],
+        "unreadable": ["run", str(damaged)],
+        "encrypted": ["run", str(_encrypted(folder / f"{PATIENT}-zu.pdf"))],
+        "paper": ["run", str(good), "--paper", "b5"],
+        "usage": ["run", str(good), "--unknown", str(folder)],
+        "usage:verb": ["prepare", str(good)],
+        "same-as-source": ["run", str(good), "--out", str(folder)],
     }
-    fine = Project.open(good, Options(reader="none"))
+    fine = Project.open(good)
     config = fine.config()
     fine.close()
     configs = {"json": "{kaputt", "format": "[1, 2]",
                "page": json.dumps({**config, "pages": config["pages"][:1]}),
-               "field": json.dumps({**config, "options": {"dpi": "viel"}})}
+               "field": json.dumps({**config, "options": {"paper": 5}})}
     for reason, content in configs.items():
-        cases[f"bad-config:{reason}"] = ["prepare", str(good), "--out", str(tmp_path / "o"),
+        cases[f"bad-config:{reason}"] = ["run", str(good), "--out", str(tmp_path / "o"),
                                          "--config", str(_config(folder, reason, content))]
-    other = json.dumps({**config, "source": {**config["source"], "sha256": "0" * 64}})
-    cases["config-mismatch"] = ["prepare", str(good), "--out", str(tmp_path / "o"),
+    other = json.dumps({**config, "input": {**config["input"], "sha256": "0" * 64}})
+    cases["config-mismatch"] = ["run", str(good), "--out", str(tmp_path / "o"),
                                 "--config", str(_config(folder, "fremd", other))]
-    cases["usage:both"] = ["prepare", str(good), "--reader", "none", "--config",
+    cases["usage:both"] = ["run", str(good), "--scan", "--config",
                            str(_config(folder, "beides", json.dumps(config)))]
     for expected, argv in cases.items():
         status, answer, err = _answer(capsys, argv)
@@ -121,25 +130,19 @@ def test_failures_by_kind_without_paths(tmp_path: Path, report: Path,
 
 def test_answer_names_the_results(tmp_path: Path, report: Path,
                                   capsys: pytest.CaptureFixture[str]) -> None:
-    """A document with a text layer: the answer names the four files and the pages."""
-    status, answer, err = _answer(capsys, ["prepare", str(report), "--out",
-                                           str(tmp_path / "out")])
+    """A born-digital document: the answer names both files and the pages; nothing was
+    prepared."""
+    status, answer, err = _answer(capsys, ["run", str(report), "--out", str(tmp_path / "out")])
     assert status == 0 and err == ""
-    assert set(answer) == HEAD | {"pdf", "reading", "markdown", "config", "pages",
-                                  "ocr_pages", "pages_without_text", "cleaned_up", "corrected",
-                                  "reader", "tables"}
-    assert answer["tables"] == (0 if tables.available() else None)  # a letter has none
-    assert answer["pages"] == 2 and answer["ocr_pages"] == [] and answer["cleaned_up"] == []
-    assert all(Path(answer[k]).parent == tmp_path / "out"
-               for k in ("pdf", "reading", "markdown", "config"))
-    reading = json.loads(Path(answer["reading"]).read_text(encoding="utf-8"))
-    assert reading["made_with"] == answer["made_with"]
+    assert set(answer) == HEAD | {"pdf", "config", "pages", "cleaned_up", "unwarped", "decided"}
+    assert answer["pages"] == 2 and answer["cleaned_up"] == [] == answer["decided"]
+    assert all(Path(answer[k]).parent == tmp_path / "out" for k in ("pdf", "config"))
 
 
 def test_standard_error_is_optdocs_own() -> None:
-    """While a command runs, what libraries write to standard error below Python (ONNX
-    Runtime warns on Linux) and what Python code prints there goes nowhere; optdoc's own
-    lines get through, and afterwards standard error is as before."""
+    """While a command runs, what libraries write to standard error below Python and what
+    Python code prints there goes nowhere; optdoc's own lines get through, and afterwards
+    standard error is as before."""
     code = ("import os, sys\n"
             "from doccor.cli import own_stderr\n"
             "with own_stderr() as said:\n"
@@ -163,100 +166,60 @@ def test_every_kind_is_worded_alike() -> None:
 
 
 def test_network_is_closed() -> None:
-    """Once the command line has started, nothing in the process reaches the network:
-    resolving a name and connecting are refused and counted, loopback included; Unix
-    sockets still work."""
-    main(["readers"])
+    """Once the command line has started, nothing in the process reaches the network."""
+    main(["about"])
     assert offline.network_forbidden()
     before = offline.attempts
     with pytest.raises(offline.NetworkForbidden):
         socket.create_connection(("192.0.2.1", 80), timeout=1)
     with pytest.raises(offline.NetworkForbidden):
         socket.getaddrinfo("example.org", 443)
-    with pytest.raises(offline.NetworkForbidden):
-        socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect(("192.0.2.1", 80))
-    import urllib.request
-
-    with pytest.raises(offline.NetworkForbidden):
-        urllib.request.urlopen("https://example.org/model.onnx", timeout=1)
-    assert offline.attempts == before + 4
-    if sys.platform != "win32":  # Windows pairs sockets over loopback, which is refused too
-        a, b = socket.socketpair(socket.AF_UNIX)
-        a.sendall(b"ok")
-        assert b.recv(2) == b"ok"
-        a.close()
-        b.close()
+    assert offline.attempts == before + 2
 
 
-@needs_backend
-def test_prepare_reads_offline(tmp_path: Path, report: Path,
-                               capsys: pytest.CaptureFixture[str]) -> None:
-    """A scan is read by OCR with the network closed, and nothing tried to go out."""
-    before = offline.attempts
-    source = scan(report, tmp_path / "scan.pdf", dpi=150)
-    status, answer, _ = _answer(capsys, ["prepare", str(source), "--out", str(tmp_path / "o")])
-    assert status == 0 and answer["ocr_pages"] == [1, 2]
-    assert offline.network_forbidden() and offline.attempts == before
-
-
-@needs_backend
-def test_prepare_on_the_command_line(tmp_path: Path, report: Path) -> None:
-    """``python -m optdoc prepare`` writes the results and answers in JSON; with
+@needs_opencv
+def test_run_on_the_command_line(tmp_path: Path, report: Path) -> None:
+    """``python -m optdoc run`` writes the results and answers in JSON; with
     ``--progress`` standard error holds one line per page and nothing else; from the
-    configuration it wrote, the same result comes again, byte for byte.  Nothing lands
+    configuration it wrote, the same files come again, byte for byte.  Nothing lands
     outside the folder given: not in the temporary folder, not in the home folder, not
     next to the source."""
     (tmp_path / "in").mkdir()
     source = scan(report, tmp_path / "in" / "scan.pdf", rotation=2.0)
-    elsewhere = {name: tmp_path / name for name in ("tmp", "home", "cache")}
-    for folder in elsewhere.values():
-        folder.mkdir()
-    env = {**os.environ, "TMPDIR": str(elsewhere["tmp"]), "TEMP": str(elsewhere["tmp"]),
-           "TMP": str(elsewhere["tmp"]), "HOME": str(elsewhere["home"]),
-           "USERPROFILE": str(elsewhere["home"]), "XDG_CACHE_HOME": str(elsewhere["cache"]),
-           "PYTHONDONTWRITEBYTECODE": "1"}
+    env, elsewhere = _clean_environment(tmp_path)
     target = tmp_path / "ergebnis"
-    run = _run(["prepare", str(source), "--out", str(target), "--progress"], env=env)
+    run = _run(["run", str(source), "--out", str(target), "--progress"], env=env)
     assert run.returncode == 0, run.stdout
     answer = json.loads(run.stdout)
-    assert answer["pages"] == 2 and answer["ocr_pages"] == [1, 2]
-    assert answer["cleaned_up"] == [1, 2] and Path(answer["pdf"]).is_file()
+    assert answer["pages"] == 2 and answer["cleaned_up"] == [1, 2]
     progress = [json.loads(z) for z in run.stderr.splitlines()]
     assert progress == [{"page": 1, "of": 2}, {"page": 2, "of": 2}]
-    assert sorted(p.name for p in target.iterdir()) == [
-        "scan.md", "scan.optdoc.json", "scan.pdf", "scan.reading.json"]
+    assert sorted(p.name for p in target.iterdir()) == ["scan.optdoc.json", "scan.pdf"]
     assert [p.name for p in (tmp_path / "in").iterdir()] == ["scan.pdf"]
     for name, folder in elsewhere.items():
         assert not any(folder.rglob("*")), name
-    second = _run(["prepare", str(source), "--out", str(tmp_path / "zwei"), "--config",
+    second = _run(["run", str(source), "--out", str(tmp_path / "zwei"), "--config",
                    answer["config"]])
     again = json.loads(second.stdout)
-    assert again["cleaned_up"] == [1, 2]
-    for key in ("pdf", "reading", "markdown", "config"):
+    for key in ("pdf", "config"):
         assert Path(again[key]).read_bytes() == Path(answer[key]).read_bytes(), key
 
 
-@needs_backend
+@needs_opencv
 @pytest.mark.skipif(importlib.util.find_spec("PySide6") is None, reason="needs PySide6")
 def test_edit_goes_through_and_leaves_nothing_behind(tmp_path: Path, report: Path) -> None:
     """``edit --self-test`` opens the window without a screen, applies, and answers like
-    ``prepare``, with the same files byte for byte; the window leaves nothing in the
-    temporary, home or cache folder (no Qt settings, no caches)."""
-    source = scan(report, tmp_path / "scan.pdf")
-    elsewhere = {name: tmp_path / name for name in ("tmp", "home", "cache")}
-    for folder in elsewhere.values():
-        folder.mkdir()
-    env = {**os.environ, "TMPDIR": str(elsewhere["tmp"]), "TEMP": str(elsewhere["tmp"]),
-           "TMP": str(elsewhere["tmp"]), "HOME": str(elsewhere["home"]),
-           "USERPROFILE": str(elsewhere["home"]), "XDG_CACHE_HOME": str(elsewhere["cache"]),
-           "PYTHONDONTWRITEBYTECODE": "1", "QT_QPA_PLATFORM": "offscreen"}
+    ``run``, with the same files byte for byte; the window leaves nothing in the
+    temporary, home or cache folder."""
+    source = scan(report, tmp_path / "scan.pdf", rotation=1.0)
+    env, elsewhere = _clean_environment(tmp_path)
     run = _run(["edit", str(source), "--out", str(tmp_path / "e"), "--self-test",
                 "--language", "de"], env=env)
     assert run.returncode == 0, run.stdout
     answer = json.loads(run.stdout)
-    assert answer["finished"] is True and answer["ocr_pages"] == [1, 2]
+    assert answer["finished"] is True and answer["cleaned_up"] == [1, 2]
     for name, folder in elsewhere.items():
         assert not any(folder.rglob("*")), (name, list(folder.rglob("*")))
-    prepared = json.loads(_run(["prepare", str(source), "--out", str(tmp_path / "p")]).stdout)
-    for key in ("pdf", "reading", "markdown", "config"):
+    prepared = json.loads(_run(["run", str(source), "--out", str(tmp_path / "p")]).stdout)
+    for key in ("pdf", "config"):
         assert Path(answer[key]).read_bytes() == Path(prepared[key]).read_bytes(), key

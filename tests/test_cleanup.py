@@ -9,7 +9,8 @@ import pytest
 
 from optdoc import cleanup
 
-pytestmark = pytest.mark.skipif(not cleanup.available(), reason="OpenCV/NumPy fehlen (Extra ocr)")
+pytestmark = pytest.mark.skipif(not cleanup.available(),
+                                reason="needs OpenCV and NumPy (extra 'cleanup')")
 
 
 def _page(report: Path) -> pymupdf.Page:
@@ -61,45 +62,72 @@ def test_sheet_in_photo_is_found(report: Path) -> None:
     assert "entzerrt" in cleanup.describe(v, "de") and "Hintergrund" in cleanup.describe(v, "de")
 
 
-def test_upscale_background_masks(report: Path) -> None:
+def test_background_and_masks(report: Path) -> None:
     import numpy as np
 
     image, scale = cleanup.render(_page(report), 72)
     h, w = image.shape[:2]
-    large = cleanup.apply_plan(image, cleanup.CleanupPlan(upscale=2))
-    assert large.shape[0] == 2 * h and large.shape[1] == 2 * w
     shadow = image.astype(np.int16) - np.linspace(0, 90, w, dtype=np.int16)[None, :, None]
     shadow = np.clip(shadow, 0, 255).astype(np.uint8)
     assert cleanup.uneven_background(shadow) and not cleanup.uneven_background(image)
     clean = cleanup.apply_plan(shadow, cleanup.CleanupPlan(background=True))
-    assert clean.ndim == 2 and np.median(clean[:, -40:]) > 240  # the shadow is gone
-    sw = cleanup.apply_plan(image, cleanup.CleanupPlan(black_white=True))
-    assert set(np.unique(sw)) <= {0, 255}
+    assert clean.ndim == 3 and np.median(clean[:, -40:]) > 240  # the shadow is gone, in colour
     masked = cleanup.apply_plan(image, cleanup.CleanupPlan(masks=[(10, 10, 60, 30)]), scale)
     assert masked[15:25, 15:55].min() == 255  # the clean-up erases (white)
     redacted = cleanup.apply_plan(image, cleanup.CleanupPlan(masks=[(10, 10, 60, 30)],
                                                      mask_colour="black"), scale)
     assert redacted[15:25, 15:55].max() == 0 and redacted[100:, 100:].max() == 255
-    v = cleanup.suggest(image, resolution=120)
-    assert v.upscale == 2 and not v.unwarp and not v.straighten
-    assert v.as_dict()["upscale"] == 2
-    assert cleanup.suggest(image, resolution=300).upscale == 1
+    v = cleanup.suggest(image)
+    assert not v.unwarp and not v.straighten and v.grey  # a letter in black: stored in grey
     assert cleanup.describe(cleanup.CleanupPlan(), "de") == "unverändert"
+
+
+def test_colours_are_kept(report: Path) -> None:
+    """A red stamp and a blue signature on a page photographed under yellowish light: the
+    background is evened out per colour channel, so the paper turns white and the stamp
+    stays red, the signature blue; the suggestion keeps such a page in colour."""
+    import cv2
+    import numpy as np
+
+    image, _ = cleanup.render(_page(report), 100)
+    stamped = image.copy()
+    cv2.rectangle(stamped, (400, 600), (700, 700), (40, 40, 220), thickness=8)
+    cv2.line(stamped, (100, 900), (600, 960), (200, 60, 30), 8)
+    h, w = stamped.shape[:2]
+    light = np.linspace(0.75, 0.95, w)[None, :, None] * np.array([0.8, 0.95, 1.0])  # yellowish
+    lit = np.clip(stamped * light, 0, 255).astype(np.uint8)
+    assert cleanup.colour_share(stamped) > cleanup.COLOUR_FROM > cleanup.colour_share(image)
+    plan = cleanup.suggest(lit)
+    assert plan.background and not plan.grey
+    out = cleanup.apply_plan(lit, plan)
+    assert out.ndim == 3
+    paper = out[h // 2 - 20:h // 2 + 20, w - 50:w - 20].reshape(-1, 3).mean(axis=0)
+    assert paper.min() > 235  # white, not yellow
+    drawn = np.abs(stamped.astype(int) - image.astype(int)).sum(axis=2) > 100
+    stamp, signature = drawn.copy(), drawn.copy()
+    stamp[800:], signature[:800] = False, False
+    b, g, r = out[stamp].mean(axis=0)
+    assert r > 150 and r > 2 * g and r > 2 * b  # the stamp is still red
+    b, g, r = out[signature].mean(axis=0)
+    assert b > r + 60  # the signature is still blue
+    png, width, height = cleanup.cleaned_image(_page(report), cleanup.CleanupPlan(rotation=180))
+    assert png[:2] == b"\xff\xd8"  # a page in colour is stored as JPEG
+    grey, _w, _h = cleanup.cleaned_image(_page(report), cleanup.CleanupPlan(rotation=180,
+                                                                         grey=True))
+    assert grey.startswith(b"\x89PNG") and len(grey) < len(png)
 
 
 def test_replace_page(report: Path, tmp_path: Path) -> None:
     doc = pymupdf.open(report)
     width = doc[0].rect.width
-    scale = cleanup.replace_page(doc, 0, cleanup.CleanupPlan(straighten=True, angle=1.0,
-                                                        masks=[(56, 60, 300, 90)]), dpi=100)
-    assert scale > 0 and len(doc) == 2 and abs(doc[0].rect.width - width) < 0.01
+    plan = cleanup.CleanupPlan(straighten=True, angle=1.0, masks=[(56, 60, 300, 90)])
+    cleanup.put_page_image(doc, 0, *cleanup.cleaned_image(doc[0], plan, dpi=100))
+    assert len(doc) == 2 and abs(doc[0].rect.width - width) < 0.01
     assert doc[0].get_images() and not doc[0].get_text("text").strip()  # an image page now
     pix = doc[0].get_pixmap(clip=pymupdf.Rect(60, 65, 290, 85), colorspace=pymupdf.csGRAY)
     assert min(pix.samples) > 240  # the erased region is white on the new page
     png, scale_v = cleanup.preview_png(doc[1], cleanup.CleanupPlan(rotation=90), dpi=50)
     assert png.startswith(b"\x89PNG") and scale_v > 0
-    large, scale_g = cleanup.preview_png(doc[1], cleanup.CleanupPlan(upscale=4), dpi=100)
-    assert scale_g > scale_v  # shown enlarged, rendered at a lower dpi to stay bounded
     doc.close()
 
 
@@ -117,14 +145,6 @@ def test_further_steps(report: Path) -> None:
     clean = cleanup.apply_plan(framed, cleanup.CleanupPlan(borders=True))
     assert clean[:, :20].min() == 255 and clean[-20:, :].min() == 255
     assert clean[100:200, 100:300].min() < 50  # the text is still there
-    # a red stamp and a blue signature vanish, black print stays
-    stamped = image.copy()
-    cv2.rectangle(stamped, (400, 600), (700, 700), (40, 40, 220), thickness=-1)
-    cv2.line(stamped, (100, 900), (600, 960), (200, 60, 30), 8)
-    assert cleanup.colour_share(stamped) > 0.003 > cleanup.colour_share(image)
-    without = cleanup.apply_plan(stamped, cleanup.CleanupPlan(remove_colour=True))
-    assert without.ndim == 2 and without[620:680, 450:650].min() == 255
-    assert without[100:200, 100:300].min() < 50
     # salt-and-pepper grain
     rng = np.random.default_rng(1)
     grey = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -138,13 +158,6 @@ def test_further_steps(report: Path) -> None:
     for a in (cleanup.CleanupPlan(contrast=True), cleanup.CleanupPlan(sharpen=True)):
         out = cleanup.apply_plan(image, a)
         assert out.shape[:2] == (h, w) and out.dtype == np.uint8
-    # ruled lines vanish, letters survive
-    ruled = image.copy()
-    cv2.line(ruled, (50, 500), (w - 50, 500), (0, 0, 0), 3)
-    cv2.line(ruled, (300, 50), (300, h - 50), (0, 0, 0), 3)
-    without_lines = cleanup.apply_plan(ruled, cleanup.CleanupPlan(remove_lines=True))
-    assert without_lines[497:504, 400:800].min() == 255
-    assert without_lines[100:200, 100:300].min() < 50
     # erasing masks are white in the clean-up, black in redaction
     white = cleanup.apply_plan(image, cleanup.CleanupPlan(masks=[(10, 10, 60, 30)]), scale)
     assert white[15:25, 15:55].min() == 255
@@ -152,23 +165,6 @@ def test_further_steps(report: Path) -> None:
                                                  mask_colour="black"), scale)
     assert black[15:25, 15:55].max() == 0
     assert "gelöscht" in cleanup.describe(cleanup.CleanupPlan(masks=[(0, 0, 1, 1)]), "de")
-
-
-def test_letter_mode_and_factors(report: Path) -> None:
-    import numpy as np
-
-    image, _ = cleanup.render(_page(report), 72)
-    h, w = image.shape[:2]
-    for factor in (2, 3, 4):
-        large = cleanup.apply_plan(image, cleanup.CleanupPlan(upscale=factor, letter_mode=True))
-        assert large.shape == (factor * h, factor * w) and large.dtype == np.uint8
-        # letter mode: grey image, white paper, dark sharpened strokes
-        assert large.ndim == 2 and np.median(large) == 255 and large.min() < 40
-    fine = cleanup.letter_finish(image, factor=1)
-    assert fine.shape == (h, w) and np.median(fine) == 255
-    v = cleanup.suggest(image, resolution=100)
-    assert v.upscale == 2 and not v.letter_mode  # letter mode is never suggested
-    assert "Buchstabenmodus" in cleanup.describe(cleanup.CleanupPlan(letter_mode=True), "de")
 
 
 def test_orientation(report: Path) -> None:
@@ -180,10 +176,10 @@ def test_orientation(report: Path) -> None:
     assert cleanup.estimate_orientation(landscape) == 90
     upright = cleanup.apply_plan(landscape, cleanup.CleanupPlan(rotation=90))
     assert upright.shape[:2] == image.shape[:2]
-    from optdoc import ocr as ocrlib
+    from optdoc.project import reader
 
-    if ocrlib.available_backends():
-        backend = ocrlib.backend("auto")
+    backend = reader()  # upside down needs ocrdoc, where it is installed
+    if backend is not None:
         flipped = cv2.rotate(image, cv2.ROTATE_180)
         assert cleanup.estimate_orientation(flipped, backend) == 180
         assert cleanup.estimate_orientation(image, backend) == 0
@@ -209,11 +205,10 @@ def test_tilt_despite_dark_border(report: Path) -> None:
 def test_description_and_active() -> None:
     """Every step has its phrase, in the listed order; a plan is active once a step would run."""
     A = cleanup.CleanupPlan
-    assert not A().active and not A(upscale=1).active
-    for plan in (A(rotation=90), A(upscale=2), A(masks=[(0, 0, 1, 1)]), A(straighten=True),
-                 A(unwarp=True), A(letter_mode=True), A(borders=True), A(remove_colour=True),
-                 A(denoise=True), A(contrast=True), A(sharpen=True), A(background=True),
-                 A(remove_lines=True), A(black_white=True)):
+    assert not A().active and not A(grey=True).active  # grey is no step
+    for plan in (A(rotation=90), A(masks=[(0, 0, 1, 1)]), A(straighten=True), A(unwarp=True),
+                 A(borders=True), A(denoise=True), A(contrast=True), A(sharpen=True),
+                 A(background=True)):
         assert plan.active, plan
     assert cleanup.describe(A(rotation=90), "de") == "um 90° gedreht"
     assert cleanup.describe(A(rotation=90)) == "rotated by 90°"
@@ -222,14 +217,11 @@ def test_description_and_active() -> None:
     assert cleanup.describe(A(straighten=True, angle=2.04), "de") == "begradigt (+2,0°)"
     assert cleanup.describe(A(straighten=True, angle=0.01), "de") == "unverändert"
     assert cleanup.describe(A(unwarp=True), "de") == "unverändert"  # no corners, nothing to unwarp
-    high = A(upscale=3, letter_mode=True)
-    assert cleanup.describe(high, "de") == "3× hochskaliert (Buchstabenmodus)"
     black = A(masks=[(0, 0, 1, 1)], mask_colour="black")
     assert cleanup.describe(black, "de") == "1 Bereich(e) geschwärzt"
-    everything = A(rotation=180, straighten=True, angle=-1.5, borders=True, remove_colour=True,
-              denoise=True, contrast=True, sharpen=True, background=True,
-              remove_lines=True, black_white=True, masks=[(0, 0, 1, 1), (2, 2, 3, 3)])
+    everything = A(rotation=180, straighten=True, angle=-1.5, borders=True, denoise=True,
+                   contrast=True, sharpen=True, background=True,
+                   masks=[(0, 0, 1, 1), (2, 2, 3, 3)], grey=True)
     assert cleanup.describe(everything, "de") == (
-        "um 180° gedreht, begradigt (-1,5°), Ränder gesäubert, farbige Tinte entfernt, entrauscht, "
-        "Kontrast angehoben, geschärft, Hintergrund geglättet, Linien entfernt, Schwarz-Weiß, "
-        "2 Bereich(e) gelöscht")
+        "um 180° gedreht, begradigt (-1,5°), Ränder gesäubert, entrauscht, Kontrast angehoben, "
+        "geschärft, Hintergrund geglättet, 2 Bereich(e) gelöscht, in Graustufen")

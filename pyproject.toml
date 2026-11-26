@@ -1,12 +1,12 @@
 [project]
 name = "optdoc"
 version = "0.7.0"
-description = "Makes photographed and scanned documents legible: straighten, clean up, OCR with word boxes and tables, searchable PDF."
+description = "Makes photographed and scanned pages faithful: upright, unwarped in their true proportions, straightened, evenly lit, in their own colours; reproducible."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "AGPL-3.0-or-later"
 authors = [{ name = "fre.ms", email = "fre.ms@fre.ms" }]
-keywords = ["ocr", "scan", "document", "dewarp", "deskew", "pdf", "searchable-pdf", "tesseract", "rapidocr"]
+keywords = ["scan", "photo", "document", "dewarp", "deskew", "perspective", "pdf", "reproducible"]
 classifiers = [
   "Development Status :: 2 - Pre-Alpha",
   "Environment :: Console",
@@ -18,7 +18,7 @@ classifiers = [
   "Topic :: Text Processing",
 ]
 dependencies = [
-  # the core the tools of reprodoc share: configuration documents, errors, the command
+  # the core the tools of docrepro share: configuration documents, errors, the command
   # line's manners, no network, the window's building blocks
   "doccor>=0.1",
   # <2: PyMuPDF 2.0 (MuPDF 1.28.5) shifts glyphs after a redaction; optdoc's pages are
@@ -27,17 +27,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# RapidOCR brings OpenCV and NumPy, which the clean-up steps need as well
-ocr = ["rapidocr>=3", "onnxruntime>=1.18", "pillow>=10", "pillow-heif>=0.18"]
-tables = [
-    "camelot-py>=2.2",
-]
+# the preparation itself; opencv-python (not -headless), as RapidOCR in ocrdoc has it, so
+# that both tools can live in one environment
+cleanup = ["opencv-python>=4.8", "numpy>=1.26", "pillow>=10", "pillow-heif>=0.18"]
 gui = [
     "pyside6-essentials>=6.8",
-]
-# finds and reads barcodes (QR, DataMatrix, PDF417, Code 128, EAN …) as areas of a page
-barcodes = [
-    "zxing-cpp>=2.3",
 ]
 
 [tool.uv.sources]
@@ -51,9 +45,6 @@ optdoc = "optdoc.cli:main"
 Source = "https://github.com/fre-ms/optdoc"
 
 [dependency-groups]
-build = [
-    "pyinstaller>=6.11",
-]
 dev = [
   "pytest>=8",
   "pytest-timeout>=2.3",

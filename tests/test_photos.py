@@ -1,5 +1,5 @@
 """Photographed pages: told from scans by the page itself, inside a PDF too (photos bound
-the way medRDS binds them), unwarped; turned pages read and written upright."""
+the way medRDS binds them), unwarped; turned pages prepared and written upright."""
 
 from __future__ import annotations
 
@@ -10,14 +10,11 @@ import pymupdf
 import pytest
 
 from optdoc import cleanup, output
-from optdoc import ocr as ocrlib
 from optdoc.loading import open_document
-from optdoc.reading import read
+from optdoc.project import Options, Project
 from tests.synthetic import bind, camera_photo, lab_report, photograph
 
-pytestmark = pytest.mark.skipif(not cleanup.available(), reason="needs OpenCV (extra 'ocr')")
-needs_backend = pytest.mark.skipif(not ocrlib.available_backends(),
-                                   reason="no OCR engine installed")
+pytestmark = pytest.mark.skipif(not cleanup.available(), reason="needs OpenCV (extra 'cleanup')")
 
 
 def _image(page: pymupdf.Page) -> tuple:
@@ -76,42 +73,39 @@ def test_photos_bound_into_a_pdf(tmp_path: Path) -> None:
             assert not cleanup.suggest(image, False, scale).unwarp
 
 
-@needs_backend
-def test_bound_photo_read_upright(tmp_path: Path) -> None:
-    """The page turned by /Rotate is read upright and written upright; the boxes of the
-    reading are where the PDF has its words, with and without clean-up."""
-    pdf, truth = lab_report(tmp_path, 2)
+def test_bound_photo_prepared_upright(tmp_path: Path) -> None:
+    """The page turned by /Rotate is prepared upright and written upright, unwarped as a
+    photo; with the automatic preparation off, it is written as it came, upright too."""
+    pdf, _ = lab_report(tmp_path, 2)
     side = photograph(pdf, tmp_path / "quer.jpg", orientation=6)
     bound = bind([side], tmp_path / "geheftet.pdf")
     for clean_up in (True, False):
-        reading = read(bound, clean_up=clean_up)
+        project = Project.open(bound, Options(clean_up=clean_up))
         try:
-            assert reading.pages[0].ocr and bool(reading.plan) == clean_up
-            text = reading.pages[0].text
-            first = truth[0].split()[0]
-            assert first in text.text
-            a = text.text.index(first)
-            box = text.rects(a, a + len(first))[0]
-            paths = output.write(reading, tmp_path / f"out-{clean_up}")
+            assert bool(project.cleaned_up) == clean_up
+            prepared = project.build()
+            try:
+                assert prepared.unwarped == ([0] if clean_up else [])
+                paths = output.write(prepared, tmp_path / f"out-{clean_up}")
+            finally:
+                prepared.close()
         finally:
-            reading.close()
+            project.close()
         with pymupdf.open(paths["pdf"]) as out:
-            assert out[0].rotation == 0
-            found = out[0].search_for(first)
-            assert any(abs(r.x0 - box.x0) < 1 and abs(r.y0 - box.y0) < 3 for r in found)
+            assert out[0].rotation == 0 and out[0].rect.height > out[0].rect.width
 
 
-@needs_backend
 def test_exif_turned_photo(tmp_path: Path) -> None:
-    """A JPEG whose pixels lie on their side, with EXIF saying so, is read upright."""
-    pdf, truth = lab_report(tmp_path, 3)
-    reading = read(photograph(pdf, tmp_path / "foto.jpg", orientation=6))
+    """A JPEG whose pixels lie on their side, with EXIF saying so, is prepared upright."""
+    pdf, _ = lab_report(tmp_path, 3)
+    project = Project.open(photograph(pdf, tmp_path / "foto.jpg", orientation=6))
     try:
-        page = reading.doc[0]
-        assert page.rect.height > page.rect.width and reading.plan[0].unwarp
-        assert truth[0].split()[0] in reading.pages[0].text.text
+        page = project.original[0]
+        assert page.rect.height > page.rect.width
+        plan = project.plan(0)
+        assert plan is not None and plan.unwarp
     finally:
-        reading.close()
+        project.close()
 
 
 # -- photographed at a slant ----------------------------------------------------------------------

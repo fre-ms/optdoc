@@ -60,20 +60,6 @@ def _lab_reports() -> ModuleType:
     return module
 
 
-def area_letter(folder: Path, number: int = 1) -> tuple[Path, list[dict]]:
-    """The bench's invented letter ``number`` with a logo, a picture, a stamp, handwriting
-    and barcodes (``bench/area_letters.py``), and its areas as drawn."""
-    import json
-
-    spec = importlib.util.spec_from_file_location(
-        "area_letters", Path(__file__).resolve().parents[1] / "bench" / "area_letters.py")
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    pdf = module.make(folder, number)[number - 1]
-    return pdf, json.loads(pdf.with_name(pdf.stem + ".areas.json").read_text(encoding="utf-8"))
-
-
 def colour_scan(source: Path, target: Path, dpi: int = 200, rotation: float = 1.0,
                 seed: int = 1) -> Path:
     """An image-only PDF of a page scanned in colour: turned a little, with grain and a

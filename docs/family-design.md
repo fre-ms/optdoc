@@ -1,12 +1,16 @@
-# The reprodoc family: one tool for one step
+# The docrepro family: one tool for one step
 
 Status: design, 26 November 2026, with the user's decisions of the same day (at the end).
-optdoc 0.6.0 is the last release that does everything in one; the core (doccor) is the
-first stage.
+optdoc 0.6.0 is the last release that does everything in one. Stage 1 (doccor 0.1.0) is
+released; stage 2 (ocrdoc 0.1.0, optdoc 0.7.0 trimmed to the preparation) is built, and the
+chain checked: an invented photo through optdoc and ocrdoc gives every file again from the
+original and the two configuration documents, byte for byte; a change in optdoc that keeps
+a page's frame keeps a person's corrections and areas in ocrdoc, one that moves the page
+drops them and says so.
 
-**reprodoc** reproduces photographed and scanned documents as digital documents. (Said this
-way wherever the name stands: in German medicine "Repro" first suggests reproductive
-medicine.)
+**docrepro** reproduces photographed and scanned documents as digital documents. (Named so
+on 26 November 2026 instead of the working name reprodoc, which read in German medicine like a
+doctor of reproductive medicine; `docs/name-search-docrepro-2026-11-26.md`.)
 
 ## Why
 
@@ -26,7 +30,7 @@ own and together, each replaceable by another program:
 | **ocrdoc** | recognise: areas, text, tables, barcodes | any PDF (optdoc's, or another program's) | the same pages with a text layer, the reading, Markdown |
 | **semdoc** | understand: medical terms and identifying information, with their codes (through lexterm and lexident) | a reading | the annotations |
 | **tagdoc** | describe: what the document is (kind, date, sender, recipient) | a document with its reading and annotations | its metadata (in the PDF and beside it) |
-| **reprodoc** | the whole way, in one window and one program | a photo or a scan | a real digital document |
+| **docrepro** | the whole way, in one window and one program | a photo or a scan | a real digital document |
 
 A small shared core, **doccor** (as lexcor is for lexterm and lexident), holds what every
 tool needs, so that nothing is written twice.
@@ -41,7 +45,7 @@ core implements once.
 ### The configuration document
 
 Each tool writes one per input: `<stem>.optdoc.json`, `<stem>.ocrdoc.json`,
-`<stem>.semdoc.json`, `<stem>.tagdoc.json`, and reprodoc `<stem>.reprodoc.json` for the
+`<stem>.semdoc.json`, `<stem>.tagdoc.json`, and docrepro `<stem>.docrepro.json` for the
 whole way. It is JSON (UTF-8, the same bytes for the same content), and its name says so;
 the part before `.json` names the tool.
 
@@ -80,9 +84,9 @@ may add its own metadata as an incremental update; the embedded documents stay r
 
 A step's input is the output of the step before (or any file a person brings). Since that
 output is reproducible to the byte, the chain is: the original and the configuration
-documents give the final document again. `<stem>.reprodoc` holds the way as a whole: the
-original's SHA-256 and every step's document, so that `reprodoc run <original> --config
-<stem>.reprodoc.json` makes everything again and `reprodoc edit` goes on where the person
+documents give the final document again. `<stem>.docrepro.json` holds the way as a whole: the
+original's SHA-256 and every step's document, so that `docrepro run <original> --config
+<stem>.docrepro.json` makes everything again and `docrepro edit` goes on where the person
 stopped.
 
 **When a person changes an earlier step** (more contrast in optdoc), the later steps'
@@ -140,10 +144,10 @@ progress lines), the network lock and ONNX Runtime's telemetry switched off, set
 the window's building blocks (page view, background work, words in two languages, the
 frame with Apply, Save and continue later, Cancel).
 
-**reprodoc** joins them: the chain and its document, `reprodoc run` and `reprodoc edit`,
+**docrepro** joins them: the chain and its document, `docrepro run` and `docrepro edit`,
 one window whose tabs come from the tools installed (a tool that is missing leaves its tab
 out), and the standalone program: one Python with every tool inside, called as
-`reprodoc optdoc …`, `reprodoc ocrdoc …` or as a whole, so that a records app ships one
+`docrepro optdoc …`, `docrepro ocrdoc …` or as a whole, so that a records app ships one
 program, not four of 160 MB each.
 
 ## The command lines
@@ -161,7 +165,7 @@ the result, Save and continue later the configuration document alone, Cancel not
 `about` says what the installation can do (today's `readers`). Everything else as optdoc
 does it today: one JSON answer, status 0 or 2, nothing outside `--out`, never the network,
 no path or content in any message. `--config` takes the configuration document or a PDF
-the tool wrote. reprodoc adds `reprodoc run|edit <original>` for the whole way.
+the tool wrote. docrepro adds `docrepro run|edit <original>` for the whole way.
 
 ## Models as an optional download
 
@@ -185,10 +189,10 @@ being worked on:
 |---|---|---|
 | `optdoc-config` version 2 | optdoc | version 1, without the steps that move to ocrdoc |
 | `ocrdoc-config` version 1 | ocrdoc | the OCR part of `optdoc-config` 1 |
-| `ocrdoc-reading` version 1 | ocrdoc | `optdoc-reading` 1, unchanged in content |
+| `ocrdoc-reading` version 1 | ocrdoc | `optdoc-reading` 1, without the clean-up plan and the input's file name (named by its SHA-256 instead) |
 | `semdoc-annotations` version 1 | semdoc | — |
 | `tagdoc-config` version 1 | tagdoc | — |
-| `reprodoc-chain` version 1 | reprodoc | — |
+| `docrepro-chain` version 1 | docrepro | — |
 
 The old formats go when the new ones come (no compatibility layer); optdoc 0.6.0 stays
 available for whoever has not moved yet.
@@ -198,7 +202,7 @@ available for whoever has not moved yet.
 - **optdoc** keeps its repository and history, trimmed to the preparation.
 - **ocrdoc** comes out of optdoc with the history of its modules (`git filter-repo`), as
   optdoc came out of PseudonyMed.
-- **doccor** and **reprodoc** are new repositories; doccor's code moves out of optdoc.
+- **doccor** and **docrepro** are new repositories; doccor's code moves out of optdoc.
 - **semdoc** and **tagdoc** follow later.
 
 All AGPL-3.0, the core too: code that two applications share is application code (the
@@ -212,8 +216,8 @@ Each stage is released and tested before the next; each keeps the chain reproduc
 2. **ocrdoc**, out of optdoc: the recognition moves, optdoc's output keeps its colours,
    the configuration documents `.optdoc.json` and `.ocrdoc.json`, the frame rule, `run`,
    `edit`, `about`. The tests check that original + `.optdoc.json` + `.ocrdoc.json` give the same files.
-3. **reprodoc**: the chain document, the joined window, the one program; a handoff to
-   medorello (from `optdoc edit` to `reprodoc edit`) and to PseudonyMed (imports from
+3. **docrepro**: the chain document, the joined window, the one program; a handoff to
+   medorello (from `optdoc edit` to `docrepro edit`) and to PseudonyMed (imports from
    ocrdoc and optdoc, the window's panels).
 4. **Models** as an optional download (areas, handwriting, orientation), each measured
    against the rules it would replace.
@@ -221,9 +225,12 @@ Each stage is released and tested before the next; each keeps the chain reproduc
 
 ## Decided (the user, 26 November 2026)
 
-- The names stay as they are: optdoc, ocrdoc, semdoc, tagdoc, reprodoc; the core is
+- The names of the tools stay as they are: optdoc, ocrdoc, semdoc, tagdoc; the core is
   **doccor** (its .org domain is free). A first check found no live mark against any of
   them (DPMAregister: DE, EU and international marks with German effect; TMview and the US
-  register not yet); semdoc and reprodoc share their names with projects in other fields.
+  register not yet); semdoc shares its name with projects in other fields.
+- The whole application is **docrepro** (the user, later the same day, after reprodoc,
+  facsimdoc and facsim): every domain free, no mark in the DPMAregister, TMview or the US
+  register (`docs/name-search-docrepro-2026-11-26.md`).
 - The configuration documents are named `<stem>.<tool>.json` ("clearer, more honest").
 - Every tool's verbs are `run`, `edit` and `about`.

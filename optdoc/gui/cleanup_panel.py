@@ -1,9 +1,8 @@
-"""The clean-up of one page, checked by eye: before and after side by side, every step
-switchable, the sheet's corners dragged on the original, masks drawn on the result.
+"""The preparation of one page, checked by eye: before and after side by side, every
+step switchable, the sheet's corners dragged on the original, areas erased on the result.
 
 From PseudonyMed's step "Aufbereiten".  The panel works on a :class:`~optdoc.project.
-Project`; every change goes into the project at once (:meth:`Project.set_plan`), which
-then reads the page again when its text is needed.
+Project`; every change goes into the project at once (:meth:`Project.set_plan`).
 """
 
 from __future__ import annotations
@@ -15,7 +14,6 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QImage, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QCheckBox,
-    QComboBox,
     QDoubleSpinBox,
     QFormLayout,
     QGroupBox,
@@ -34,13 +32,13 @@ from optdoc.gui.words import Words
 from optdoc.project import Project
 
 # the switches of the form, in the order of the plan's fields they set
-_SWITCHES = ("straighten", "unwarp", "letter_mode", "background", "black_white", "borders",
-             "remove_colour", "denoise", "contrast", "sharpen", "remove_lines")
+_SWITCHES = ("straighten", "unwarp", "background", "borders", "denoise", "contrast", "sharpen",
+             "grey")
 _STRENGTHS = ("denoise", "contrast", "sharpen")
-# what "copy the steps to every page" copies (not a page's own tilt, corners or masks)
-_COPIED = ("upscale", "letter_mode", "background", "black_white", "borders", "remove_colour",
-           "denoise", "denoise_strength", "contrast", "contrast_strength", "sharpen",
-           "sharpen_strength", "remove_lines")
+# what "copy the steps to every page" copies (not a page's own tilt, corners, masks or
+# colour, which each page has of its own)
+_COPIED = ("background", "borders", "denoise", "denoise_strength", "contrast",
+           "contrast_strength", "sharpen", "sharpen_strength")
 
 
 class CleanupPanel(QWidget):
@@ -110,8 +108,7 @@ class CleanupPanel(QWidget):
         return box
 
     def _build_steps(self) -> QGroupBox:
-        """Tilt, sheet, upscaling, letter mode, background, black and white, rotation and
-        the masks."""
+        """Tilt, sheet, background, colour, rotation and the masks."""
         group = QGroupBox(self.w("steps"))
         form = QFormLayout(group)
         self.boxes: dict[str, QCheckBox] = {}
@@ -128,13 +125,7 @@ class CleanupPanel(QWidget):
         form.addRow(line)
         self.boxes["unwarp"] = self._check("unwarp")
         form.addRow(self.boxes["unwarp"])
-        self.upscaling = QComboBox()
-        for factor in (1, 2, 3, 4):
-            self.upscaling.addItem(self.w("not") if factor == 1 else f"{factor}×", factor)
-        self.upscaling.setToolTip(self.w("upscale_tip"))
-        self.upscaling.currentIndexChanged.connect(lambda _i: self._from_form())
-        form.addRow(self.w("upscale"), self.upscaling)
-        for key, tip in (("letter_mode", "letter_tip"), ("background", ""), ("black_white", "")):
+        for key, tip in (("background", "background_tip"), ("grey", "grey_tip")):
             self.boxes[key] = self._check(key, tip)
             form.addRow(self.boxes[key])
         rotate = QHBoxLayout()
@@ -152,11 +143,11 @@ class CleanupPanel(QWidget):
         return group
 
     def _build_further(self) -> QGroupBox:
-        """Borders, coloured ink, the three steps with a strength, lines, orientation."""
+        """Borders, the three steps with a strength, orientation."""
         group = QGroupBox(self.w("further"))
         form = QFormLayout(group)
         self.sliders: dict[str, QSlider] = {}
-        for key in ("borders", "remove_colour", "denoise", "contrast", "sharpen", "remove_lines"):
+        for key in ("borders", "denoise", "contrast", "sharpen"):
             self.boxes[key] = self._check(key)
             if key in _STRENGTHS:
                 slider = QSlider(Qt.Orientation.Horizontal)
@@ -184,7 +175,7 @@ class CleanupPanel(QWidget):
         """Restore the suggestion, leave the page alone, copy the steps to every page."""
         buttons = QVBoxLayout()
         for key, action in (("restore", self.restore), ("skip", self.skip),
-                            ("to_all", self.copy_to_all)):
+                            ("steps_to_all", self.copy_to_all)):
             button = QPushButton(self.w(key))
             button.clicked.connect(action)
             buttons.addWidget(button)
@@ -223,7 +214,6 @@ class CleanupPanel(QWidget):
                 self.boxes[key].setChecked(bool(getattr(a, key)))
             self.boxes["unwarp"].setEnabled(bool(a.corners))
             self.angle.setValue(a.angle)
-            self.upscaling.setCurrentIndex(max(0, min(3, a.upscale - 1)))
             for key, slider in self.sliders.items():
                 slider.setValue(getattr(a, f"{key}_strength"))
                 slider.setEnabled(bool(getattr(a, key)))
@@ -239,14 +229,13 @@ class CleanupPanel(QWidget):
             setattr(a, key, self.boxes[key].isChecked())
         a.unwarp = a.unwarp and bool(a.corners)
         a.angle = self.angle.value()
-        a.upscale = int(self.upscaling.currentData() or 1)
         for key, slider in self.sliders.items():
             setattr(a, f"{key}_strength", slider.value())
         self._commit()
 
-    def _commit(self) -> None:
+    def _commit(self, by_person: bool = True) -> None:
         """Hand the plan to the project, redraw, and say that it changed."""
-        self.project.set_plan(self.number, self.plan)
+        self.project.set_plan(self.number, self.plan, by_person)
         self.draw()
         self.changed.emit(self.number)
 
@@ -296,11 +285,12 @@ class CleanupPanel(QWidget):
         """optdoc's suggestion again."""
         self.plan = self.project.suggestion(self.number)
         self._to_form()
-        self._commit()
+        self._commit(by_person=False)
 
     def skip(self) -> None:
         """Every step off: the page is read as it came."""
-        self.plan = cleanup.CleanupPlan(corners=self.plan.corners, angle=self.plan.angle)
+        self.plan = cleanup.CleanupPlan(corners=self.plan.corners, angle=self.plan.angle,
+                                        grey=self.plan.grey)
         self._to_form()
         self._commit()
 
@@ -321,14 +311,9 @@ class CleanupPanel(QWidget):
 
     def detect_orientation(self) -> None:
         """Turn the page upright: portrait or landscape from the lines, upside down by a
-        short OCR comparison where an engine is there."""
+        short OCR comparison where ocrdoc is installed."""
         try:
-            engine = self.project.engine()
-        except Exception:  # no engine: the lines alone decide
-            engine = None
-        image, _scale = cleanup.render(self.project.original[self.number], 150)
-        try:
-            degrees = cleanup.estimate_orientation(image, engine)
+            degrees = self.project.orientation(self.number)
         except Exception as e:  # said in the note, the page stays as it is
             self.note.setText(self.w("orientation_failed",
                                      error=describe_error(e, self.w.language)))
@@ -360,7 +345,7 @@ class CleanupPanel(QWidget):
             self.after.scale_factor = PREVIEW_DPI / 72.0
             self.after.display(self.project.original_png(n, PREVIEW_DPI))
             self.note.setText(self.w("has_layer") if cleanup.available()
-                              else self.w("no_opencv"))
+                              else self.w("no_opencv_cleanup"))
             return
         self._show_corners()
         try:

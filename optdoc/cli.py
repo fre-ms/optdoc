@@ -1,17 +1,15 @@
-"""The command line: ``optdoc readers``, ``optdoc prepare``, ``optdoc edit`` (the window)
-and ``optdoc bench``.
+"""The command line: ``optdoc about``, ``optdoc run`` and ``optdoc edit`` (the window).
 
 Every command answers with exactly one JSON object on standard output, whether it
-succeeds or fails, so that programs in any language can call optdoc as a helper (a
-Tauri sidecar, for one).  ``docs/interface.md`` describes the answers; they carry the
-version of that description as ``interface``.  A failure answers with its kind
-(:mod:`optdoc.errors`) and its message in English and German, and ends with exit status
-2.  No answer and no message quotes a document or its path, and ``bench`` names no file
-at all.  ``--progress`` writes a line of JSON per page to standard error.  ``prepare`` and
-``edit`` take a configuration (``--config``) and make the same result from it every time
-(:mod:`optdoc.project`).
+succeeds or fails, so that programs in any language can call optdoc as a helper.
+``docs/interface.md`` describes the answers; they carry the version of that description
+as ``interface``.  A failure answers with its kind (:mod:`optdoc.errors`) and its message
+in English and German, and ends with exit status 2.  No answer and no message quotes a
+document or its path.  ``--progress`` writes a line of JSON per page to standard error.
+``run`` and ``edit`` take a configuration document (``--config``) and make the same
+result from it every time (:mod:`optdoc.project`).
 
-The command line keeps the manners every tool of reprodoc keeps (:mod:`doccor.cli`): one
+The command line keeps the manners every tool of docrepro keeps (:mod:`doccor.cli`): one
 JSON answer whatever happens, standard error for its own lines, and never the network
 (:mod:`doccor.offline`).
 """
@@ -26,51 +24,40 @@ from typing import Any
 
 from doccor import cli as frame
 
-from optdoc import __version__, areas, cleanup, tables
-from optdoc import ocr as ocrlib
+from optdoc import __version__, cleanup
 from optdoc.errors import OptdocError
 from optdoc.project import SUFFIX, Options, Project, load_config
 
-INTERFACE = 2  # the version of docs/interface.md the answers follow
+INTERFACE = 3  # the version of docs/interface.md the answers follow
+TOOL = "optdoc"
 
 
-def _heic() -> bool:
-    """True when HEIC photos can be opened (pillow-heif installed)."""
-    return importlib.util.find_spec("pillow_heif") is not None
-
-
-def _readers(args: argparse.Namespace) -> dict[str, Any]:
+def _about(args: argparse.Namespace) -> dict[str, Any]:
     """What this installation can do."""
     from optdoc import gui
 
-    return {"version": __version__, "readers": ocrlib.available_backends(),
-            "clean_up": cleanup.available(), "heic": _heic(), "tables": tables.available(),
-            "window": gui.available(), "barcodes": areas.barcodes_available()}
+    return {"version": __version__, "clean_up": cleanup.available(),
+            "heic": importlib.util.find_spec("pillow_heif") is not None,
+            "window": gui.available(),
+            "upside_down": importlib.util.find_spec("ocrdoc") is not None}
 
 
 # the options that decide the result; with --config the configuration decides them
-_SETTINGS = ("reader", "languages", "paper", "photo", "no_clean_up", "no_tables",
-             "no_structure", "no_areas")
+_SETTINGS = ("paper", "photo", "no_clean_up", "colour_pages")
 
 
 def _project(args: argparse.Namespace) -> Project:
-    """The project on the file: from its configuration (``--config``, a JSON file or a
-    PDF optdoc wrote), or fresh with the options given.  Both at once is a "usage"."""
+    """The project on the file: from its configuration document (``--config``, a JSON
+    file or a PDF optdoc wrote), or fresh with the options given.  Both at once is a
+    "usage"."""
     if args.config is not None:
         if any(getattr(args, name) is not None for name in _SETTINGS):
             raise OptdocError("usage")
-        project = Project.open(args.file, config=load_config(args.config))
-        project.scratch = _out(args)  # nothing of the document anywhere but there
-        if args.no_cells:  # as before the configuration held it: no tables found
-            project.leave_out_found_tables()
-        return project
-    options = Options(reader=args.reader or "auto", languages=args.languages,
-                      tables=not args.no_tables, paper=args.paper or "a4", photo=args.photo,
-                      clean_up=not args.no_clean_up, structure=not args.no_structure,
-                      cells=not args.no_cells, areas=not args.no_areas)
-    project = Project.open(args.file, options)
-    project.scratch = _out(args)  # nothing of the document anywhere but there
-    return project
+        return Project.open(args.file, config=load_config(args.config))
+    options = Options(paper=args.paper or "a4", photo=args.photo,
+                      clean_up=not args.no_clean_up,
+                      colour_pages=args.colour_pages or cleanup.COLOUR_PAGES[0])
+    return Project.open(args.file, options)
 
 
 def _out(args: argparse.Namespace) -> Path:
@@ -82,26 +69,23 @@ def _results(project: Project, args: argparse.Namespace) -> dict[str, Any]:
     """Make the result of a project, write it, and sum it up."""
     from optdoc import output
 
-    reading = project.build(frame.progress if args.progress else None)
+    prepared = project.build(frame.progress if args.progress else None)
     try:
-        paths = output.write(reading, _out(args))
+        paths = output.write(prepared, _out(args))
         return {
             **{k: str(v) for k, v in paths.items()},
-            "pages": len(reading.pages),
-            "ocr_pages": [s.number + 1 for s in reading.pages if s.ocr],
-            "pages_without_text": [n + 1 for n in reading.without_text],
-            "cleaned_up": [n + 1 for n in sorted(reading.plan)],
-            "corrected": [n + 1 for n in project.corrected],
-            "reader": reading.reader,
-            "tables": (None if reading.tables is None
-                       else sum(len(t) for t in reading.tables.values())),
+            "pages": len(project.pages),
+            "cleaned_up": [n + 1 for n in prepared.cleaned_up],
+            "unwarped": [n + 1 for n in prepared.unwarped],
+            "decided": [n + 1 for n in project.decided_by_person],
         }
     finally:
-        reading.close()
+        prepared.close()
 
 
-def _prepare(args: argparse.Namespace) -> dict[str, Any]:
-    """Read the file (or make it again from its configuration) and write the results."""
+def _run(args: argparse.Namespace) -> dict[str, Any]:
+    """Prepare the file (or prepare it again from its configuration) and write the
+    results."""
     project = _project(args)
     try:
         return _results(project, args)
@@ -131,26 +115,13 @@ def _edit(args: argparse.Namespace) -> dict[str, Any]:
         project.close()
 
 
-def _bench(args: argparse.Namespace) -> dict[str, Any]:
-    """Score the documents of a bench folder; numbers only."""
-    from optdoc.bench import bench, documents_in
-
-    if not args.folder.is_dir():
-        raise OptdocError("missing")
-    result = bench(args.folder, args.reader, clean_up=not args.no_clean_up).as_dict()
-    return {"documents_found": len(documents_in(args.folder)), **result}
-
-
 def _document_options(pr: argparse.ArgumentParser) -> None:
-    """The options of prepare and edit.  The settings default to None, so that the use of
-    one beside ``--config`` can be told."""
-    pr.add_argument("file", type=Path, help="a PDF or an image (JPEG, PNG, TIFF, HEIC …)")
+    """The options of run and edit.  The settings default to None, so that the use of one
+    beside ``--config`` can be told."""
+    pr.add_argument("file", type=Path, help="a photo, an image (JPEG, PNG, TIFF, HEIC …) or a PDF")
     pr.add_argument("--out", type=Path, help="folder for the results (default: <file>.optdoc/)")
     pr.add_argument("--config", type=Path,
                     help="configuration to start from: <name>.optdoc.json, or a PDF optdoc wrote")
-    pr.add_argument("--reader", choices=["auto", "rapidocr", "tesseract", "none"],
-                    help="OCR engine (default: auto)")
-    pr.add_argument("--languages", help="language packs: deu+eng for Tesseract, de for RapidOCR")
     pr.add_argument("--paper",
                     help="paper an image is placed on: a4 (default), a5, a3, letter, legal, image")
     kind = pr.add_mutually_exclusive_group()
@@ -159,48 +130,36 @@ def _document_options(pr: argparse.ArgumentParser) -> None:
     kind.add_argument("--scan", dest="photo", action="store_const", const=False,
                       help="take every page for a scan: never unwarp")
     pr.add_argument("--no-clean-up", action="store_const", const=True,
-                    help="no automatic clean-up")
-    pr.add_argument("--no-tables", action="store_const", const=True,
-                    help="no second pass for table grids (Tesseract)")
-    pr.add_argument("--no-structure", action="store_const", const=True,
-                    help="raw OCR lines, no Markdown")
-    pr.add_argument("--no-cells", action="store_true",
-                    help="find no tables with their cells (extra 'tables'); "
-                         "a person can still set them in the window")
-    pr.add_argument("--no-areas", action="store_const", const=True,
-                    help="find no barcodes, stamps, pictures or handwriting; "
-                         "a person can still set them in the window")
+                    help="leave the pages as they came unless a person prepares them")
+    pr.add_argument("--colour-pages", choices=list(cleanup.COLOUR_PAGES),
+                    help="how a page in colour is stored: jpeg (default, quality 92) or png "
+                         "(lossless, some ten times the size)")
     pr.add_argument("--progress", action="store_true",
                     help='a line {"page": n, "of": m} on standard error per page')
 
 
 def _parser() -> argparse.ArgumentParser:
     """The argument parser."""
-    p = frame.Parser(prog="optdoc",
-                     description="Make photographed and scanned documents legible.")
-    p.add_argument("--version", action="version", version=f"optdoc {__version__}")
+    p = frame.Parser(prog=TOOL, description="Make photographed and scanned pages faithful: "
+                                            "upright, unwarped, evenly lit, in their colours.")
+    p.add_argument("--version", action="version", version=f"{TOOL} {__version__}")
     sub = p.add_subparsers(dest="command", required=True)
-    sub.add_parser("readers", help="list the OCR engines and abilities of this installation")
-    pr = sub.add_parser("prepare", help="clean up a document, read it and write the results")
-    _document_options(pr)
-    ed = sub.add_parser("edit", help="open the window: clean up by eye, correct the text")
+    sub.add_parser("about", help="what this installation can do")
+    ru = sub.add_parser("run", help="prepare a document and write the results")
+    _document_options(ru)
+    ed = sub.add_parser("edit", help="open the window: prepare the pages by eye")
     _document_options(ed)
     ed.add_argument("--language", choices=["de", "en"],
                     help="language of the window (default: the system's)")
     ed.add_argument("--self-test", action="store_true", help=argparse.SUPPRESS)
-    be = sub.add_parser("bench", help="score readings against truth files (numbers only)")
-    be.add_argument("folder", type=Path, help="documents with a <name>.truth.txt next to each")
-    be.add_argument("--reader", action="append", choices=["rapidocr", "tesseract"],
-                    help="engine to score; repeatable (default: every installed engine)")
-    be.add_argument("--no-clean-up", action="store_true", help="no automatic clean-up")
     return p
 
 
 COMMANDS: dict[str, Callable[[argparse.Namespace], dict[str, Any]]] = {
-    "readers": _readers, "prepare": _prepare, "edit": _edit, "bench": _bench}
+    "about": _about, "run": _run, "edit": _edit}
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the command line; returns the exit status."""
-    return frame.main(_parser(), COMMANDS, tool="optdoc", version=__version__,
+    return frame.main(_parser(), COMMANDS, tool=TOOL, version=__version__,
                       interface=INTERFACE, argv=argv)

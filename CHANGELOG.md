@@ -2,23 +2,54 @@
 
 ## 0.7.0 (unreleased)
 
-The first stage of dividing optdoc into tools of one step each (`docs/family-design.md`):
-what every tool of reprodoc shares is now doccor's, a library of its own. optdoc behaves
-as before; its interface (2) and formats are unchanged.
+optdoc does one thing now: it makes a photographed or scanned page **faithful**. Reading it
+(OCR, areas, tables, barcodes, the text layer, the reading, the bench) moved to **ocrdoc**,
+with its history; what the tools of docrepro share is **doccor**'s (`docs/family-design.md`).
+optdoc's output keeps the page's colours; the configuration document records every page's
+frame, so that a person's decisions in ocrdoc survive a change in optdoc that does not move
+the page. Interface 3; `optdoc-config` version 2. optdoc 0.6.0 stays available for whoever
+needs both steps in one program until docrepro has it.
 
 ### Changed
 
-- optdoc depends on **doccor**: the configuration document's mechanics (its bytes, the
-  SHA-256 of the input, reading it from a file or a PDF, embedding it without dates, the
-  PDF's identifier), the common kinds of error and their wording, the command line's
-  manners (one JSON answer, usage errors as answers, standard error for its own lines),
-  the network lock and ONNX Runtime's telemetry switch, and the window's page view,
-  worker and words. optdoc registers its own kinds of error and words there.
+- **Colours stay.** Evening out the background works per colour channel: the paper turns
+  white, a red stamp stays red, a blue signature blue. Nothing takes coloured ink away any
+  more. A page with less than 0.3 % of colour is stored in grey (PNG); one with colour by
+  default as JPEG at quality 92 with full colour resolution, since a lossless page in colour
+  is some ten times the size, or losslessly as PNG (`--colour-pages png`, the option
+  `colour_pages`, a choice in the window). TIFF is no choice: a PDF holds no TIFF, and one
+  given to it is stored exactly as a PNG. The plan has `grey`, suggested by the page.
+- **The configuration document** is `optdoc-config` version 2: `input` (SHA-256, size,
+  suffix and every page's size) instead of `source`; per page its `plan`, who decided it
+  (`by`: "auto" or "person") and its `frame`, a fingerprint of where things lie on the
+  prepared page (its size, and the turning, unwarping and straightening that made it).
+  Light, contrast, colour and masks leave the frame as it is. Version 1 is refused.
+- **The PDF** has the prepared pages and no text layer; it carries its configuration
+  document (`optdoc.json`) for the steps after it. No reading and no Markdown: those are
+  ocrdoc's.
+- **The command line** has the verbs of every tool of docrepro: `about` (fields `clean_up`,
+  `heic`, `window`, `upside_down`), `run` (what `prepare` did for the page) and `edit`.
+  Options: `--out`, `--config`, `--paper`, `--photo`/`--scan`, `--no-clean-up`,
+  `--colour-pages`, `--progress`. The answer of `run`: `pdf`, `config`, `pages`, `cleaned_up`, `unwarped`,
+  `decided`. Interface 3 (`docs/interface.md`).
+- **The window** has the preparation only, with "Store in grey" among the steps; "Detect
+  the orientation" tells an upside-down page where ocrdoc is installed (a provider, not a
+  dependency), else portrait or landscape from the lines.
+- optdoc depends on **doccor**: the configuration document's mechanics, the common kinds of
+  error and their wording, the command line's manners, the network lock, and the window's
+  page view, worker and words.
+- Extras: `cleanup` (OpenCV, NumPy, Pillow, pillow-heif) and `gui`.
 
 ### Removed
 
-- `optdoc.offline` (now `doccor.offline`), `optdoc.gui.view` and `optdoc.gui.worker` (now
-  in `doccor.gui`).
+- Upscaling, letter mode, removing coloured ink and ruled lines, black and white (ocrdoc's
+  filters now, on its own copy of a page); the OCR engines, page text, text layer,
+  corrections, structure, areas, tables, the reading and the bench (ocrdoc); the settings of
+  the OCR layer (`OPTDOC_OCR` …); `readers`, `prepare`, `bench`; the kinds of error
+  `unknown-reader`, `no-reader`, `reader-failed`, `not-ocr`, `page-text`.
+- The standalone program and its build (`packaging/`, `docs/sidecar.md`): one program with
+  every tool inside is to come with docrepro.
+- `optdoc.offline`, `optdoc.gui.view` and `optdoc.gui.worker` (now in `doccor`).
 
 ## 0.6.0 (2026-11-26)
 
