@@ -26,11 +26,15 @@ own and together, each replaceable by another program:
 
 | tool | its one step | takes | gives |
 |---|---|---|---|
-| **optdoc** | make the page faithful: upright, unwarped, in its true proportions, evenly lit, in its own colours | a photo, a scan, any PDF | a PDF of the prepared pages |
-| **ocrdoc** | recognise: areas, text, tables, barcodes | any PDF (optdoc's, or another program's) | the same pages with a text layer, the reading, Markdown |
-| **semdoc** | understand: medical terms and identifying information, with their codes (through lexterm and lexident) | a reading | the annotations |
-| **tagdoc** | describe: what the document is (title, kind, date, authors, the people it names) | ocrdoc's PDF (and semdoc's annotations, once there) | its metadata as medRDS says (XMP and the information dictionary in the PDF, or a sidecar) |
-| **docrepro** | the whole way, in one window and one program | a photo or a scan | a real digital document |
+| **typdoc** | change the type, and nothing else: bind pictures into one PDF as medRDS 9.5 says | pictures | one PDF |
+| **optdoc** | make the page faithful: upright, unwarped, in its true proportions, evenly lit, in its own colours | a photo, a scan, any PDF | the prepared document, of the type it came in |
+| **ocrdoc** | recognise: areas, text, tables, barcodes | a PDF or a picture (optdoc's, or another program's) | the same pages with a text layer (beside a picture: the reading), the reading, Markdown |
+| **tagdoc** | describe: what the document is (title, kind, date, authors, the people it names) | what ocrdoc gave | its metadata as medRDS says (in the PDF or the picture, or a sidecar) |
+| **docrepro** | the whole way, in one window and one program | a photo, a scan, the pictures of one document | a real digital document |
+
+**docrepro brings a document as near to its original as it can, and goes no further** (the
+user, 27 November 2026): its pages, its text, what it says of itself. Understanding what the
+text says and signing the document are other tasks (below, "Not docrepro's").
 
 A small shared core, **doccor** (as lexcor is for lexterm and lexident), holds what every
 tool needs, so that nothing is written twice.
@@ -44,8 +48,8 @@ core implements once.
 
 ### The configuration document
 
-Each tool writes one per input: `<stem>.optdoc.json`, `<stem>.ocrdoc.json`,
-`<stem>.semdoc.json`, `<stem>.tagdoc.json`, and docrepro `<stem>.docrepro.json` for the
+Each tool writes one per input: `<stem>.typdoc.json`, `<stem>.optdoc.json`,
+`<stem>.ocrdoc.json`, `<stem>.tagdoc.json`, and docrepro `<stem>.docrepro.json` for the
 whole way. It is JSON (UTF-8, the same bytes for the same content), and its name says so;
 the part before `.json` names the tool.
 
@@ -103,11 +107,10 @@ preparation, and the other way round, and so with every tool). A step that is no
 for a document hands on what it got, untouched; the chain document says for every step
 whether it was in use (`docrepro-chain` version 2), so that the same original and document
 give the same files whatever is installed later. A step that is switched off keeps its
-configuration document, for what a person decided in it. What a step cannot do without
-another it declares (semdoc needs ocrdoc's reading), and a step that gets what it cannot
-take says so itself: ocrdoc reads PDFs, and a photo becomes one through optdoc alone. The
-window shows the steps beside the tabs, each with a switch and what became of it: off, in
-use as suggested, changed by hand, to be made anew.
+configuration document, for what a person decided in it. No step needs another, and a
+step that gets what it cannot take says so itself. The window shows the steps beside the
+tabs, each with a switch and what became of it: off, in use as suggested, changed by hand,
+to be made anew.
 
 ### What "the same" means
 
@@ -140,51 +143,14 @@ taking coloured ink away, ruled lines away, black and white, Tesseract's second 
 ruled tables. ocrdoc lays its text layer over the input's pages and leaves their pictures
 as they are.
 
-**semdoc** finds medical terms (lexterm) and identifying information (lexident) in a
-reading, with their spans and boxes and codes, for a person to confirm (`<stem>.semdoc`
-holds the proposals and the decisions). It waits for lexterm and lexident to be libraries.
-
-**tagdoc** suggests what a document is (title, kind, clinical date, language; from its text,
-later from semdoc's annotations), a person confirms or completes it (authors, institution,
-the people it names, with copies of their cards from an address book), and tagdoc writes it
-as medRDS chapter 7 says: XMP with the information dictionary in step, or a sidecar for a PDF
-signed by someone else. The standard keeps its vocabulary and its reference library (in
-JavaScript, which medorello and medonomina use to file); tagdoc writes the same packet in
-Python, character by character, and its tests let the reference library read it back. What
-belongs to filing (the record, the versions, who filed it, where it came from) stays the
-records app's.
-
-**attdoc, the signing step** (step 50, the last; named by the user, see "Decided") puts a
-document beyond later change: a time stamp, and a person's signature.
-It differs from every step before it, and the differences are part of its contract:
-
-- **It rests on TimeAttest**, as tagdoc rests on medRDS: TimeAttest signs PDFs (PAdES),
-  gathers and renews time stamps, verifies, and holds the signers (a software certificate,
-  a token, the electronic health professional card). The step calls it; it writes no
-  cryptography of its own. TimeAttest runs on Java, so the step is optional in the
-  standalone program too.
-- **Two kinds of personal signature** (the user): the qualified one with the health
-  professional card, and an advanced one with a software certificate. The step names which
-  kind a document got, and never calls the second "qualified".
-- **It cannot be made again, only verified.** A time stamp and a card's signature differ
-  every time. So for this step "reproduce" means: make the steps before it again, byte for
-  byte, and check that the signature covers exactly those bytes. Its configuration
-  document records what was signed (the SHA-256), how, by which certificate, with which
-  time-stamp service, and the outcome of the verification.
-- **It goes on the network for a time stamp**, on request, as `models fetch` does for a
-  model: one more door in the network lock, open for that request alone. Only the hash of
-  the document leaves the computer, never the document. An application that runs docrepro
-  with the network closed runs this step outside that fence.
-- **It never runs unasked.** A signature is a declaration of a person's will: the step is
-  off unless a person switches it on for a document, in the window or on the command line,
-  and a qualified signature needs the person's PIN at the card reader each time.
-- **Nothing after it changes the file.** tagdoc already writes into a sidecar where a PDF is
-  signed (medRDS 7.5). A records app that files a signed PDF does the same, or files first
-  and signs afterwards; which of the two is to be decided with the records app. A PDF
-  carries its signature inside; any other file gets it beside (a signature container, an
-  evidence record), as TimeAttest does.
-- **Time stamps gathered over many files** (one qualified stamp for a batch) are
-  TimeAttest's work on a whole record, not this step's on one document.
+**tagdoc** suggests what a document is (title, kind, clinical date, language; from its
+text), a person confirms or completes it (authors, institution, the people it names, with
+copies of their cards from an address book), and tagdoc writes it as medRDS chapter 7 says:
+XMP with the information dictionary in step, or a sidecar for a PDF signed by someone else.
+The standard keeps its vocabulary and its reference library (in JavaScript, which medorello
+and medonomina use to file); tagdoc writes the same packet in Python, character by
+character, and its tests let the reference library read it back. What belongs to filing (the
+record, the versions, who filed it, where it came from) stays the records app's.
 
 **The core, doccor,** holds what all tools share: the configuration document (head, SHA-256, frame,
 rounding, embedding in a PDF, the deterministic file identifier), the command line's
@@ -199,12 +165,31 @@ out), and the standalone program: one Python with every tool inside, called as
 `docrepro optdoc …`, `docrepro ocrdoc …` or as a whole, so that a records app ships one
 program, not four of 160 MB each.
 
-**semdoc and tagdoc** have their places in docrepro from the start (orders 30 and 40, what
-they take and give, their formats). A step joins the chain by being installed: docrepro
-brings the adapters of optdoc and ocrdoc, and any other step brings its own through the
-entry-point group `docrepro.steps` (tagdoc does) (an adapter opens the step's project on its input, gives
-its configuration document, writes its result and names the pages whose decisions went).
-A chain document that names a step which is not installed is refused (`step-missing`).
+A step joins the chain by being installed: docrepro brings the adapters of optdoc and
+ocrdoc, and typdoc and tagdoc bring their own through the entry-point group
+`docrepro.steps` (an adapter opens the step's project on its input, gives its configuration
+document, writes its result and names the pages whose decisions went). A chain document
+that names a step which is not installed is refused (`step-missing`).
+
+## Not docrepro's
+
+Two tasks were planned as steps and are not (the user, 27 November 2026: docrepro brings a
+document as near to its original as it can, and these go beyond that):
+
+- **Understanding what the text says**: medical terms and identifying information, with
+  their codes (lexterm, lexident, through lexcor). It interprets the document rather than
+  reproducing it. A program that does it (it was to be called semdoc) takes ocrdoc's
+  reading, `ocrdoc-reading`, which carries every word with its box: that is the handoff,
+  and docrepro needs nothing more for it. It stays with the lex family and the programs
+  that use it (PseudonyMed).
+- **Signing**: a time stamp and a person's signature (the qualified one with the health
+  professional card, an advanced one with a software certificate). TimeAttest does that
+  already, on the finished document docrepro gives. In the chain it would also have broken
+  the rule every step keeps: a signature can only be verified, never made again from the
+  original. (It was to be called attdoc.)
+
+With them went what only they needed in docrepro: a step's place reserved before its tool
+exists, and one step needing another (`step-needs`).
 
 ## The file keeps its type
 
@@ -224,9 +209,7 @@ each format, 7.5 for sidecars, 6.4 for text drawn from a file):
 | **typdoc** (order 5, optional) | nothing to do | binds pictures into one PDF as medRDS 9.5 says: a JPEG is the image of its page byte for byte, a picture of another format is attached to its page and shown as a JPEG, the page is turned as the picture's orientation says |
 | optdoc | the prepared pages, in the PDF | the prepared picture, in the format it came in |
 | ocrdoc | the text layer in the PDF; the reading and Markdown beside | the picture untouched; the reading and Markdown beside |
-| semdoc | annotations beside | annotations beside |
 | tagdoc | XMP and the information dictionary | JPEG and PNG: XMP in the file; other formats: a sidecar `<file name>.xmp` |
-| attdoc | the signature in the PDF | the signature and the evidence beside |
 
 typdoc is on for pictures unless a person switches it off, so that PDF stays the rule; with
 it off, a picture stays a picture through every step. optdoc takes what it is handed:
@@ -339,7 +322,6 @@ on a bench that is in the repository and runs on invented pages:
 | `optdoc-config` version 2 | optdoc | version 1, without the steps that move to ocrdoc |
 | `ocrdoc-config` version 1 | ocrdoc | the OCR part of `optdoc-config` 1 |
 | `ocrdoc-reading` version 1 | ocrdoc | `optdoc-reading` 1, without the clean-up plan and the input's file name (named by its SHA-256 instead) |
-| `semdoc-annotations` version 1 | semdoc | — |
 | `tagdoc-config` version 1 | tagdoc | — |
 | `docrepro-chain` version 1 | docrepro | — |
 
@@ -352,7 +334,7 @@ available for whoever has not moved yet.
 - **ocrdoc** comes out of optdoc with the history of its modules (`git filter-repo`), as
   optdoc came out of PseudonyMed.
 - **doccor** and **docrepro** are new repositories; doccor's code moves out of optdoc.
-- **tagdoc** is a new repository (26 November 2026); **semdoc** follows later.
+- **tagdoc** (26 November 2026) and **typdoc** (27 November 2026) are new repositories.
 
 All AGPL-3.0, the core too: code that two applications share is application code (the
 user's rule; MIT is for what a program takes from a standard).
@@ -370,19 +352,15 @@ Each stage is released and tested before the next; each keeps the chain reproduc
    ocrdoc and optdoc, the window's panels).
 4. **Models** as an optional download (areas, handwriting, orientation), each measured
    against the rules it would replace (built 26 November 2026; one model listed, above).
-5. **tagdoc** (built 26 November 2026, before the standalone program, at the user's request);
-   **semdoc**, once lexterm and lexident are libraries. As of 26 November 2026 they are not:
-   both hold design, reports and benches; the code is lexcor's (0.1: the tagger, the
-   packages, the store), which gets its annotation document and its window for a person's
-   review with 0.2. semdoc waits for that (the user, 26 November 2026); its place in
-   docrepro (step 30, the entry point, the test with a stand-in) is kept.
+5. **tagdoc** (built 26 November 2026, before the standalone program, at the user's request).
 
 ## Decided (the user, 26 November 2026)
 
-- The names of the tools stay as they are: optdoc, ocrdoc, semdoc, tagdoc; the core is
-  **doccor** (its .org domain is free). A first check found no live mark against any of
-  them (DPMAregister: DE, EU and international marks with German effect; TMview and the US
-  register not yet); semdoc shares its name with projects in other fields.
+- The names of the tools stay as they are: optdoc, ocrdoc, tagdoc (and semdoc, which is no
+  longer docrepro's: below); the core is **doccor** (its .org domain is free). A first check
+  found no live mark against any of them (DPMAregister: DE, EU and international marks with
+  German effect; TMview and the US register not yet); semdoc shares its name with projects
+  in other fields.
 - The whole application is **docrepro** (the user, later the same day, after reprodoc,
   facsimdoc and facsim): every domain free, no mark in the DPMAregister, TMview or the US
   register (`docs/name-search-docrepro-2026-11-26.md`).
@@ -394,15 +372,11 @@ Each stage is released and tested before the next; each keeps the chain reproduc
 - Every step is optional, and the window says which are in use (the user, the same night):
   a list of the steps beside the tabs, each with a switch and its state, and a sign on the
   tabs (built in docrepro 0.3.0).
-- A signing step is to come, as the last (the user, the same night): time stamps and
-  personal signatures, the qualified one with the health professional card and an advanced
-  one with a software certificate, resting on TimeAttest. It is named **attdoc** (the user,
-  27 November 2026). The user's first thought, sigdoc, is taken (PyPI, .org, .com, the
-  ACM's SIGDOC); of some eighty candidates around attest, verify, seal and proof, attdoc
-  and attestdoc passed domains, package names, web search and the DPMAregister, and
-  TMview as far as it answered (nothing containing either name); stpdoc ("stamp") passed
-  as well and reads as "step", and stamps are areas in ocrdoc. Not yet read: the classes
-  of the EU word mark ATTEST and of "Attestierer" (EU and DE, 2026), and the US register.
+- A signing step was to come, as the last (the user, the same night), and was named
+  **attdoc** (the user, 27 November 2026); the same day the user decided that signing stays
+  with TimeAttest and understanding the text with the lex family ("Not docrepro's" above),
+  so the name is not needed. (The name search, for the record: sigdoc is taken; attdoc and
+  attestdoc passed domains, package names, web search and the DPMAregister.)
 - No step forces a file type (the user, 27 November 2026; "The file keeps its type"
   above). The step that changes the type is **typdoc** (the user's name: it changes the
   document's type; before it, chgdoc, which in SAP's world means a change log). Every

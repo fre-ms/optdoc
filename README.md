@@ -15,9 +15,7 @@ real digital documents, one tool for one step:
 | [typdoc](https://github.com/fre-ms/typdoc) | changes the type, and nothing else: binds pictures into one PDF |
 | **optdoc** | makes the page faithful: upright, unwarped, in its true proportions, evenly lit, in its own colours |
 | [ocrdoc](https://github.com/fre-ms/ocrdoc) | recognises: areas, text, tables, barcodes; lays the text over the page |
-| semdoc (planned) | understands the text: medical terms, identifying information |
 | [tagdoc](https://github.com/fre-ms/tagdoc) | describes the document as the standard medRDS says |
-| attdoc (planned) | signs it: a time stamp, a person's signature |
 
 No step forces a file type. PDF is the rule, and typdoc is the one step that makes a PDF of a picture;
 optdoc takes what it is handed and gives the same kind back.
