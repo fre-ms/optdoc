@@ -40,7 +40,8 @@ def test_same_input_and_document_same_result(tmp_path: Path, report: Path) -> No
     finally:
         project.close()
     config = json.loads(first["config"])
-    assert config["format"] == "optdoc-config" and config["version"] == 2
+    assert config["format"] == "optdoc-config" and config["version"] == 3
+    assert config["options"] == {"photo": None, "clean_up": True, "colour_pages": "jpeg"}
     page = config["pages"][0]
     assert page["plan"]["straighten"] is True and page["by"] == "auto"
     assert len(page["frame"]) == 16 and config["input"]["pages"][0]["width"] > 590
@@ -184,6 +185,7 @@ def test_refused_configurations(tmp_path: Path, report: Path) -> None:
         assert (caught.value.kind, caught.value.details) == ("bad-config", {"reason": reason})
     for content, reason in (("[1]", "format"), ("{kaputt", "json"),
                             (json.dumps({**config, "version": 1}), "format"),
+                            (json.dumps({**config, "version": 2}), "format"),  # with paper
                             (json.dumps({**config, "format": "ocrdoc-config"}), "format")):
         path = tmp_path / "x.optdoc.json"
         path.write_text(content, encoding="utf-8")
@@ -193,4 +195,5 @@ def test_refused_configurations(tmp_path: Path, report: Path) -> None:
     with pytest.raises(OptdocError) as caught:
         load_config(report)  # a PDF without a configuration
     assert caught.value.details == {"reason": "format"}
-    assert Options.from_dict({"paper": "a5"}).paper == "a5"
+    assert Options.from_dict({"colour_pages": "png"}).colour_pages == "png"
+    assert Options.from_dict({"paper": "a5"}) == Options()  # no setting any more: ignored

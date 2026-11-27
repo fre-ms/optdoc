@@ -1,6 +1,6 @@
 # optdoc's command line as an interface
 
-**Interface 4**, since optdoc 0.9.0. This is what a program may
+**Interface 5**, since optdoc 0.10.0. This is what a program may
 rely on when it calls optdoc, whatever language it is written in: a records app, a pseudonymiser,
 a script, docrepro.
 
@@ -13,10 +13,16 @@ happened). Releases are tagged; pin a tag, not a branch.
 optdoc does one step of docrepro: it makes a photographed or scanned page **faithful**. Reading
 the page is ocrdoc's step after it.
 
-**From interface 3:** the answer names the prepared document `document`, no longer `pdf`, as every
-tool of docrepro does from now on: a document need not be a PDF (no step is to force a file type),
-and a field called `pdf` would then point at a picture. Nothing else changed; optdoc still writes
-a PDF.
+**From interface 4: a picture stays a picture.** optdoc forces no file type: handed a JPEG it
+writes a JPEG, handed a HEIC a HEIC, and so for PNG, TIFF, WebP, BMP, GIF and PNM; `document` in
+the answer then names that picture. Only a PDF comes back as a PDF. Making a PDF of a picture is
+typdoc's step, so the sheet of paper a picture was placed on is gone: no `--paper`, no kind of
+error `paper`, and the configuration document is version 3 (version 2 is no longer read). A
+picture is looked at as a page whose long side is that of A4 (as typdoc binds it), which is what
+the coordinates of a plan refer to.
+
+**From interface 3 (optdoc 0.9.0):** the answer names the prepared document `document`, no longer
+`pdf`, as every tool of docrepro does.
 
 **From interface 2 (optdoc 0.7.0):** optdoc no longer reads: `readers`, `prepare` and `bench` are gone, and so are
 the reading, the Markdown, the text layer and the options of the OCR engines and the areas
@@ -51,13 +57,13 @@ Every answer has these two fields:
 
 | field | example | meaning |
 |---|---|---|
-| `interface` | `4` | the version of this description |
-| `made_with` | `"optdoc 0.9.0"` | the program and its version, for the record of what made a file |
+| `interface` | `5` | the version of this description |
+| `made_with` | `"optdoc 0.10.0"` | the program and its version, for the record of what made a file |
 
 ## `about`: what this installation can do
 
 ```json
-{"interface": 4, "made_with": "optdoc 0.9.0", "version": "0.9.0",
+{"interface": 5, "made_with": "optdoc 0.10.0", "version": "0.10.0",
  "clean_up": true, "heic": true, "window": true, "upside_down": false,
  "models": [{"name": "page-orientation", "…": "…", "present": null}]}
 ```
@@ -72,29 +78,42 @@ them, below).
 
 ```
 optdoc run <file> --out <folder> [--config <file.optdoc.json | file.pdf>]
-    [--paper a4|a5|a3|letter|legal|image] [--photo | --scan] [--no-clean-up]
+    [--photo | --scan] [--no-clean-up]
     [--colour-pages jpeg|png] [--models <folder>] [--progress]
 ```
 
-`<file>` is a PDF or an image (JPEG, PNG, TIFF, BMP, GIF, WebP, PNM, HEIC, HEIF). optdoc never
+`<file>` is a PDF or a picture (JPEG, PNG, TIFF, BMP, GIF, WebP, PNM, HEIC, HEIF). optdoc never
 changes it, and always starts from it, never from an earlier result. It writes two files into
 `<folder>` (made when missing) and **nothing anywhere else**. Without `--out` the folder is
 `<file>.optdoc` beside the file.
 
 | file | what it is |
 |---|---|
-| `<stem>.pdf` | the document: every page upright, the pages a plan changed prepared, the configuration document inside |
+| `<stem>.pdf`, for a PDF | the document: every page upright, the pages a plan changed prepared, the configuration document inside |
+| `<stem>.<ending>`, for a picture | the picture in the type it came in (the ending as it came), prepared; as it came, byte for byte, where no plan changes it |
 | `<stem>.optdoc.json` | the configuration document (format `optdoc-config`, below): from it and the file, the same two files again |
+
+**A picture stays a picture.** It is prepared from its own pixels, in its own resolution, and
+written again in its type: a JPEG, a HEIC and a WebP at quality 92 with full colour resolution, a
+PNG, a TIFF (LZW), a BMP, a GIF and a PNM without loss. What the picture says of itself stays:
+the camera, the moment, the place, the colour profile, the resolution. Two things are set right
+with the pixels: the orientation says "upright" (the prepared picture is), and the small preview
+a camera embeds is left out, since it would still show the picture as it came; the sizes named
+are those of the prepared picture. A TIFF that carries directories of its own for such details
+(EXIF, GPS) is written without compression, which alone can carry them. A file of several
+pictures (a TIFF of several pages) stays one file. The configuration document lies beside the
+picture, which has no place for it.
 
 With `--config`, optdoc starts from a configuration document instead of its suggestions: a
 `<stem>.optdoc.json`, or a PDF optdoc wrote, which carries it. The document then decides every
-setting; `--paper`, `--photo`, `--scan`, `--no-clean-up` and `--colour-pages` beside it are a
+setting; `--photo`, `--scan`, `--no-clean-up` and `--colour-pages` beside it are a
 `usage` error. `--models` may stand beside it: it changes nothing of what the document decides.
+A picture carries no configuration document; for one, `--config` takes the JSON file.
 
 The answer:
 
 ```json
-{"interface": 4, "made_with": "optdoc 0.9.0",
+{"interface": 5, "made_with": "optdoc 0.10.0",
  "document": "<folder>/<stem>.pdf", "config": "<folder>/<stem>.optdoc.json",
  "pages": 2, "cleaned_up": [1, 2], "unwarped": [1], "decided": []}
 ```
@@ -118,11 +137,11 @@ given, else by optdoc's suggestion:
 - **A tilt** from 0.3 degrees on is straightened (tables lose their grid in ocrdoc from a third of
   a degree on); dark scanner borders are cleaned, uneven light evened out, grain removed.
 - **Colours stay.** The light is evened out per colour channel: the paper turns white, a red stamp
-  stays red, a blue signature blue. A page with less than 0.3 % of colour is stored in grey (PNG,
-  lossless); a page with colour as JPEG at quality 92 with full colour resolution, or losslessly
-  as PNG with `--colour-pages png` (some ten times the size). TIFF is no choice: a PDF holds no
-  TIFF, and one given to it is stored exactly as a PNG.
-- **Orientation.** An image is turned as its EXIF orientation says; a PDF page turned by `/Rotate`
+  stays red, a blue signature blue. In a PDF, a page with less than 0.3 % of colour is stored in
+  grey (PNG, lossless); a page with colour as JPEG at quality 92 with full colour resolution, or
+  losslessly as PNG with `--colour-pages png` (some ten times the size). A picture is written in
+  its own type, whatever `--colour-pages` says.
+- **Orientation.** A picture is turned as its EXIF orientation says; a PDF page turned by `/Rotate`
   is set upright without touching its picture (a JPEG stays byte for byte). The PDF has no turned
   pages, and its coordinates are those of the page as shown. A page that was scanned or
   photographed on its head or on its side says so nowhere: with the model `page-orientation` in
@@ -184,7 +203,7 @@ optdoc models fetch <name> --to <folder> [--progress]
 `models list` answers with the models optdoc can use:
 
 ```json
-{"interface": 4, "made_with": "optdoc 0.9.0",
+{"interface": 5, "made_with": "optdoc 0.10.0",
  "models": [{"name": "page-orientation", "file": "pp-lcnet-x1-0-doc-ori.onnx",
              "url": "https://huggingface.co/PaddlePaddle/PP-LCNet_x1_0_doc_ori_onnx/resolve/7330ab7039123e46af2dc03154b9969aa412c61d/inference.onnx",
              "sha256": "af9a0a4f317ff0709ce752067807f819cb15d883f8ecad89f28df1c6ee2d9c92",
@@ -221,13 +240,13 @@ file that is not the one listed, is done without, and is no error.
 configuration document names the model that took part (`"models": ["page-orientation"]`). Making
 the result again from the document needs no model and no `--models`.
 
-## The configuration document: `optdoc-config`, version 2
+## The configuration document: `optdoc-config`, version 3
 
 ```json
-{"format": "optdoc-config", "version": 2, "made_with": "optdoc 0.9.0",
+{"format": "optdoc-config", "version": 3, "made_with": "optdoc 0.10.0",
  "input": {"sha256": "…", "bytes": 245678, "suffix": ".jpg",
            "pages": [{"width": 595.276, "height": 841.89}]},
- "options": {"paper": "a4", "photo": null, "clean_up": true, "colour_pages": "jpeg"},
+ "options": {"photo": null, "clean_up": true, "colour_pages": "jpeg"},
  "pages": [{"page": 1,
             "plan": {"rotation": 0, "straighten": true, "angle": 2.1, "unwarp": true,
                      "corners": [[31.2, 40.5], "…"], "borders": false, "denoise": false,
@@ -259,7 +278,7 @@ document and with the PDF, and `edit`.
 ## Failures
 
 ```json
-{"interface": 4, "made_with": "optdoc 0.9.0", "error": "unsupported",
+{"interface": 5, "made_with": "optdoc 0.10.0", "error": "unsupported",
  "details": {"suffix": ".docx"},
  "message": {"en": "optdoc cannot open files of type .docx.",
              "de": "Dateien vom Typ .docx kann optdoc nicht öffnen."}}
@@ -275,7 +294,6 @@ what the message is made from, never a path or content.
 | `no-heic` | a HEIC or HEIF photo, and pillow-heif is not installed | |
 | `unreadable` | the file cannot be read: damaged, empty, or not what its name says | |
 | `encrypted` | the PDF needs a password | |
-| `paper` | `--paper` names no paper size | `name` |
 | `bad-config` | the document is no readable JSON, not of this version, has no entry for each page, or a value of the wrong kind | `reason`: `json`, `format`, `page`, `field` |
 | `config-mismatch` | the document belongs to another file | |
 | `same-as-source` | the PDF would overwrite the document itself | |

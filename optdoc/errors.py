@@ -31,10 +31,6 @@ _OWN: dict[str, dict[str, str]] = {
         "en": "The PDF is protected by a password.",
         "de": "Das PDF ist mit einem Kennwort geschützt.",
     },
-    "paper": {
-        "en": "Unknown paper size: {name} (a4, a5, a3, letter, legal, image).",
-        "de": "Unbekanntes Papierformat: {name} (a4, a5, a3, letter, legal, image).",
-    },
     "clean-up-failed": {
         "en": "A page could not be cleaned up.",
         "de": "Eine Seite ließ sich nicht aufbereiten.",

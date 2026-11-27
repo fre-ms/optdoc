@@ -30,7 +30,7 @@ from optdoc.errors import OptdocError
 from optdoc.models import CATALOGUE
 from optdoc.project import SUFFIX, Options, Project, load_config
 
-INTERFACE = 4  # the version of docs/interface.md the answers follow
+INTERFACE = 5  # the version of docs/interface.md the answers follow
 TOOL = "optdoc"
 
 
@@ -46,7 +46,7 @@ def _about(args: argparse.Namespace) -> dict[str, Any]:
 
 
 # the options that decide the result; with --config the configuration decides them
-_SETTINGS = ("paper", "photo", "no_clean_up", "colour_pages")
+_SETTINGS = ("photo", "no_clean_up", "colour_pages")
 
 
 def _project(args: argparse.Namespace) -> Project:
@@ -59,7 +59,7 @@ def _project(args: argparse.Namespace) -> Project:
         project = Project.open(args.file, config=load_config(args.config))
         project.models = args.models
         return project
-    options = Options(paper=args.paper or "a4", photo=args.photo,
+    options = Options(photo=args.photo,
                       clean_up=not args.no_clean_up,
                       colour_pages=args.colour_pages or cleanup.COLOUR_PAGES[0])
     project = Project.open(args.file, options)
@@ -125,12 +125,11 @@ def _edit(args: argparse.Namespace) -> dict[str, Any]:
 def _document_options(pr: argparse.ArgumentParser) -> None:
     """The options of run and edit.  The settings default to None, so that the use of one
     beside ``--config`` can be told."""
-    pr.add_argument("file", type=Path, help="a photo, an image (JPEG, PNG, TIFF, HEIC …) or a PDF")
+    pr.add_argument("file", type=Path,
+                    help="a PDF, or a picture (JPEG, PNG, TIFF, HEIC …), which stays a picture")
     pr.add_argument("--out", type=Path, help="folder for the results (default: <file>.optdoc/)")
     pr.add_argument("--config", type=Path,
                     help="configuration to start from: <name>.optdoc.json, or a PDF optdoc wrote")
-    pr.add_argument("--paper",
-                    help="paper an image is placed on: a4 (default), a5, a3, letter, legal, image")
     kind = pr.add_mutually_exclusive_group()
     kind.add_argument("--photo", dest="photo", action="store_const", const=True,
                       help="take every page without text for a photo: find the sheet, unwarp it")

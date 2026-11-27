@@ -97,7 +97,7 @@ def test_failures_by_kind_without_paths(tmp_path: Path, report: Path,
         "unsupported": ["run", str(text)],
         "unreadable": ["run", str(damaged)],
         "encrypted": ["run", str(_encrypted(folder / f"{PATIENT}-zu.pdf"))],
-        "paper": ["run", str(good), "--paper", "b5"],
+        "usage:paper": ["run", str(good), "--paper", "a4"],  # the sheet of paper is typdoc's
         "usage": ["run", str(good), "--unknown", str(folder)],
         "usage:verb": ["prepare", str(good)],
         "same-as-source": ["run", str(good), "--out", str(folder)],
@@ -107,7 +107,7 @@ def test_failures_by_kind_without_paths(tmp_path: Path, report: Path,
     fine.close()
     configs = {"json": "{kaputt", "format": "[1, 2]",
                "page": json.dumps({**config, "pages": config["pages"][:1]}),
-               "field": json.dumps({**config, "options": {"paper": 5}})}
+               "field": json.dumps({**config, "options": {"clean_up": "ja"}})}
     for reason, content in configs.items():
         cases[f"bad-config:{reason}"] = ["run", str(good), "--out", str(tmp_path / "o"),
                                          "--config", str(_config(folder, reason, content))]

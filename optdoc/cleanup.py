@@ -1053,10 +1053,12 @@ def encoded(image: Any, colour_pages: str = "jpeg") -> bytes:
     return bytes(buffer)
 
 
-def _process(page: pymupdf.Page, a: CleanupPlan, dpi: int) -> tuple[Any, float, float]:
+def _process(page: pymupdf.Page, a: CleanupPlan, dpi: int,
+             rendered: tuple[Any, float] | None = None) -> tuple[Any, float, float]:
     """Processed image of ``page`` (grey where the plan says so), its width in points and
-    its pixels per point."""
-    image, scale = render(page, dpi)
+    its pixels per point.  ``rendered`` gives the page's image and its pixels per point
+    where they are at hand already (a picture's own pixels), instead of a rendering."""
+    image, scale = rendered if rendered is not None else render(page, dpi)
     out = apply_plan(image, CleanupPlan(**{**a.__dict__, "masks": []}), scale)
     width = page.rect.width if a.rotation in (0, 180) else page.rect.height
     new_scale = out.shape[1] / width
@@ -1074,6 +1076,12 @@ def cleaned_image(page: pymupdf.Page, a: CleanupPlan, dpi: int = 300,
     after a quarter turn), the height following the image."""
     out, width, new_scale = _process(page, a, dpi)
     return encoded(out, colour_pages), width, out.shape[0] / new_scale
+
+
+def prepared_pixels(page: pymupdf.Page, a: CleanupPlan, image: Any, scale: float) -> Any:
+    """A picture's own pixels (``image``, ``scale`` pixels to a point of ``page``)
+    prepared by ``a``: what a picture that stays a picture is written from."""
+    return _process(page, a, 0, (image, scale))[0]
 
 
 def put_page_image(doc: pymupdf.Document, number: int, image: bytes, width: float,

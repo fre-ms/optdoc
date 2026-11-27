@@ -233,14 +233,26 @@ it off, a picture stays a picture through every step. optdoc takes what it is ha
 typdoc's PDF, or the original. Several pictures of one document are bound by typdoc, or
 stay several documents.
 
-What follows for the tools as they are (0.8 / 0.2 / 0.1 / docrepro 0.3): optdoc makes a
-PDF of every picture today, on a sheet of paper, and must write back the type it got (the
-sheet of paper is typdoc's); ocrdoc reads PDFs only and must read pictures, its reading
-saying whether a box is in points or in pixels; tagdoc needs the ways into JPEG and PNG;
-docrepro hands on "the PDF" and must hand on "the document", with the chain document
-beside a picture instead of inside it. Order of work: typdoc, optdoc, ocrdoc, tagdoc,
-docrepro; each stage takes one restriction away. To be measured before it is promised:
-whether a HEIC picture can be written again byte for byte.
+Where the tools stand, stage by stage (order of work: typdoc, optdoc, ocrdoc, tagdoc; each
+stage takes one restriction away, and docrepro follows each):
+
+- **typdoc** is there (0.1.0; step 5 of docrepro from 0.4.0): it binds as medRDS 9.5 says, the
+  same bytes as the standard's reference library.
+- **Every tool names what it hands on `document`**, not `pdf` (27 November 2026; typdoc 0.2.0,
+  optdoc 0.9.0, ocrdoc 0.3.0, tagdoc 0.2.0, docrepro 0.5.0).
+- **optdoc keeps the type it is handed** (0.10.0): a picture is prepared from its own pixels
+  and written again as what it was; one that needs no preparing comes back byte for byte.
+  What the picture says of itself stays; the orientation is set upright and the embedded
+  preview left out (the user's decision). The sheet of paper went to typdoc. Measured before
+  it was promised: a HEIC picture is written again byte for byte (pillow-heif 1.9.0, x265
+  4.3, on arm64; not compared between platforms). docrepro (0.6.0) writes a picture as its
+  result, with the chain document beside it, and says that a step reading PDFs needs typdoc.
+- **ocrdoc** reads PDFs only and is to read pictures, its reading saying whether a box is in
+  points or in pixels, and lay the reading beside the picture.
+- **tagdoc** describes PDFs only and is to write into JPEG and PNG as medRDS 7.4 says, and
+  into a sidecar for the other formats.
+- **docrepro's window** is built on the steps that read PDFs: for a picture typdoc stays on
+  there until ocrdoc reads pictures.
 
 ## The command lines
 

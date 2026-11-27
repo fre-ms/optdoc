@@ -32,14 +32,14 @@ import pymupdf
 from doccor import documents
 from doccor.errors import DocError
 
-from optdoc import __version__, cleanup
+from optdoc import __version__, cleanup, pictures
 from optdoc import models as catalogue
 from optdoc import orientation as upright
 from optdoc.errors import OptdocError
-from optdoc.loading import open_document
+from optdoc.loading import is_picture, open_document
 
 FORMAT = "optdoc-config"
-FORMAT_VERSION = 2
+FORMAT_VERSION = 3  # 3: no paper (a picture stays a picture; typdoc binds one into a PDF)
 SUFFIX = ".optdoc.json"
 EMBEDDED = "optdoc.json"  # the name of the configuration document inside the PDF
 DPI = 300  # the resolution pages are prepared at
@@ -50,12 +50,12 @@ Progress = Any  # a callable (page from 1, number of pages) -> None
 
 @dataclass
 class Options:
-    """The settings that decide the result: the paper an image is placed on, photo or
-    scan (None: told by each page), whether pages are prepared by optdoc's suggestion
-    (``clean_up``) or left as they came unless a person prepares them, and how a page in
-    colour is stored (``colour_pages``: "jpeg", the default, or "png", lossless)."""
+    """The settings that decide the result: photo or scan (None: told by each page),
+    whether pages are prepared by optdoc's suggestion (``clean_up``) or left as they came
+    unless a person prepares them, and how a page in colour is stored in a PDF
+    (``colour_pages``: "jpeg", the default, or "png", lossless; a picture is written in
+    the type it came in)."""
 
-    paper: str = "a4"
     photo: bool | None = None
     clean_up: bool = True
     colour_pages: str = "jpeg"
@@ -72,8 +72,7 @@ class Options:
             raise OptdocError("bad-config", reason="field")
         options = cls()
         kinds: dict[str, tuple[type, ...]] = {
-            "paper": (str,), "photo": (bool, type(None)), "clean_up": (bool,),
-            "colour_pages": (str,)}
+            "photo": (bool, type(None)), "clean_up": (bool,), "colour_pages": (str,)}
         for name, value in d.items():
             if name not in kinds:
                 continue
@@ -152,19 +151,22 @@ def config_bytes(config: dict[str, Any]) -> bytes:
 
 @dataclass
 class Prepared:
-    """The result of a project: the document with its pages prepared, the configuration
-    that makes it again, and the pages (from 0) that were changed.  Call :meth:`close`
-    when done."""
+    """The result of a project: the document with its pages prepared (``doc``, a PDF; or
+    ``picture``, the bytes of a picture in the type it came in), the configuration that
+    makes it again, and the pages (from 0) that were changed.  Call :meth:`close` when
+    done."""
 
     source: Path
-    doc: pymupdf.Document
+    doc: pymupdf.Document | None
     config: dict[str, Any]
     cleaned_up: list[int]
     unwarped: list[int]
+    picture: bytes | None = None
 
     def close(self) -> None:
         """Close the document."""
-        self.doc.close()
+        if self.doc is not None:
+            self.doc.close()
 
 
 def reader() -> Any | None:
@@ -185,7 +187,8 @@ class Project:
     def __init__(self, source: Path, doc: pymupdf.Document, sha256: str, size: int,
                  options: Options) -> None:
         self.source = source
-        self.original = doc  # every page upright, as it came
+        self.picture = is_picture(source)  # it stays one: written in the type it came in
+        self.original = doc  # every page upright, as it came (a picture: looked at as pages)
         self.sha256 = sha256
         self.size = size
         self.options = options
@@ -212,7 +215,7 @@ class Project:
                 raise OptdocError("config-mismatch")
             options = Options.from_dict(config.get("options", {}))
         options = options or Options()
-        doc = open_document(source, options.paper)
+        doc = open_document(source)
         project = cls(source, doc, sha256, source.stat().st_size, options)
         if config is not None:
             try:
@@ -390,7 +393,25 @@ class Project:
 
     def build(self, progress: Progress | None = None) -> Prepared:
         """The result: a copy of the input with every page its plan changes replaced by
-        the prepared page.  The caller closes it."""
+        the prepared page; for a picture, the picture again in the type it came in, with
+        its prepared pixels (and as it came, byte for byte, where no plan changes it).
+        The caller closes it."""
+        unwarped = [n for n in self.cleaned_up
+                    if (p := self.active_plan(n)) is not None and p.unwarp and p.corners]
+        if self.picture:
+            prepared: list[Any | None] = []
+            for n in range(len(self.pages)):
+                if progress is not None:
+                    progress(n + 1, len(self.pages))
+                plan = self.active_plan(n)
+                if plan is None:
+                    prepared.append(None)
+                    continue
+                image = pictures.pixels(self.source, n)  # its own pixels, not a rendering
+                scale = image.shape[1] / self.original[n].rect.width
+                prepared.append(cleanup.prepared_pixels(self.original[n], plan, image, scale))
+            return Prepared(self.source, None, self.config(), self.cleaned_up, unwarped,
+                            pictures.written(self.source, prepared))
         doc = pymupdf.open("pdf", self.original.tobytes())
         try:
             for n in range(len(self.pages)):
@@ -402,8 +423,6 @@ class Project:
         except Exception:
             doc.close()
             raise
-        unwarped = [n for n in self.cleaned_up
-                    if (p := self.active_plan(n)) is not None and p.unwarp and p.corners]
         return Prepared(self.source, doc, self.config(), self.cleaned_up, unwarped)
 
 

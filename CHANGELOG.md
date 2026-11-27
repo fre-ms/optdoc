@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.10.0 (2026-11-27)
+
+A picture stays a picture. docrepro forces no file type, and optdoc is the first of its tools to
+keep the one it is handed. Interface 5; `optdoc-config` version 3.
+
+### Changed
+
+- **Handed a picture, optdoc writes a picture of the same type**: a JPEG gives a JPEG, a HEIC a
+  HEIC, and so for PNG, TIFF, WebP, BMP, GIF and PNM. Until now it made a PDF of every picture, on
+  a sheet of A4. A PDF comes back as a PDF, as before. Making a PDF of a picture is typdoc's step.
+- **Prepared from its own pixels**, in its own resolution (not from a rendering of a page), and
+  written at quality 92 with full colour resolution (JPEG, HEIC, WebP) or without loss (the
+  others). A picture no plan changes is written as it came, byte for byte. A file of several
+  pictures (a TIFF of several pages) stays one file. The same picture and configuration document
+  give the same bytes (measured for HEIC as well: the same picture written in separate runs).
+- **What the picture says of itself stays** (the user's decision): the camera, the moment, the
+  place, the colour profile, the resolution. The orientation is set upright, since the prepared
+  picture is; the small preview a camera embeds is left out, since it would still show the
+  picture as it came; the sizes named are those of the prepared picture. A TIFF with directories
+  of its own for such details (EXIF, GPS) is written without compression, which alone can carry
+  them; any other TIFF with LZW.
+- **A picture is looked at as a page whose long side is that of A4**, upright as its EXIF
+  orientation says: the page typdoc binds it into (medRDS 9.5). A plan's coordinates mean the
+  same whether optdoc is handed the picture or typdoc's PDF of it.
+- **The configuration document is version 3**: no `paper`. It lies beside a picture, which has no
+  place for it. Version 2 is no longer read.
+
+### Removed
+
+- `--paper`, the option `paper`, the kind of error `paper`, and `optdoc.loading.paper_size`: the
+  sheet of paper a picture was placed on went with the PDF optdoc made of it.
+
+### Fixed
+
+- **WebP pictures open.** They were listed among the types optdoc takes and failed as
+  "unreadable": the PDF library does not read them. Every picture that is no JPEG is now decoded
+  by the library that also prepares it.
+
 ## 0.9.0 (2026-11-27)
 
 Interface 4: one field renamed, in every tool of docrepro at once.

@@ -1,6 +1,6 @@
 [project]
 name = "optdoc"
-version = "0.9.0"
+version = "0.10.0"
 description = "Makes photographed and scanned pages faithful: upright, unwarped in their true proportions, straightened, evenly lit, in their own colours; reproducible."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -29,7 +29,8 @@ dependencies = [
 [project.optional-dependencies]
 # the preparation itself; opencv-python (not -headless), as RapidOCR in ocrdoc has it, so
 # that both tools can live in one environment
-cleanup = ["opencv-python>=4.8", "numpy>=1.26", "pillow>=10", "pillow-heif>=0.18"]
+# pillow 13: what a picture says of itself is written again as optdoc.pictures expects
+cleanup = ["opencv-python>=4.8", "numpy>=1.26", "pillow>=13", "pillow-heif>=0.18"]
 gui = [
     "pyside6-essentials>=6.8",
 ]
