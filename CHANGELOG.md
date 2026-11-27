@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.11.0 (2026-11-27)
+
+Interface 5 and `optdoc-config` version 3 stay; one thing is added for programs that use optdoc in
+Python.
+
+### Added
+
+- **`Project.open(file, config=…, same_document=True)`**: a document made on one file is taken
+  for another that shows the very same pages, as a picture and the PDF typdoc bound it into do
+  (the page of a picture is the page typdoc binds it into). Every page must have the size the
+  document names, to a hundredth of a point (`config-mismatch` otherwise); what a person planned
+  stays, optdoc's own plans are suggested anew, and `Project.rebased` says so. Without the word
+  of the caller, another file is refused as before. docrepro's window takes a person's plans
+  along this way when typdoc is switched for a picture.
+
 ## 0.10.1 (2026-11-27)
 
 The picture as a page is written once, in doccor (0.3.0). Nothing a caller relies on changed:

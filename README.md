@@ -27,7 +27,7 @@ What they share (configuration documents, the command line's manners, no network
 building blocks) is [doccor](https://github.com/fre-ms/doccor)'s. [docs/family-design.md](docs/family-design.md)
 describes the family and why it is divided so.
 
-**Status: pre-alpha (0.10.1).** The code comes from PseudonyMed, with its history. Up to 0.6.0 optdoc
+**Status: pre-alpha (0.11.0).** The code comes from PseudonyMed, with its history. Up to 0.6.0 optdoc
 also read the pages (OCR, areas, tables, a searchable PDF); that is ocrdoc now, which came out of optdoc
 with its history. `CHANGELOG.md` lists the changes.
 

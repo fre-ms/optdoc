@@ -17,7 +17,12 @@ marked as optdoc's suggestion or a person's decision.  It serves three ends:
   as long as its frame stays the same, even when the page itself changed (more contrast).
 
 The document names its input by its SHA-256; another file is refused ("config-mismatch").
-optdoc always starts from the original, never from an earlier result.
+optdoc always starts from the original, never from an earlier result.  One exception, for
+a caller that knows better (``same_document``): a picture and the PDF typdoc bound it
+into show the very same pages (the page of a picture is the page typdoc binds it into,
+:mod:`doccor.pictures`), so a document made on one of them is taken for the other, where
+every page has the same size; what a person planned stays, and optdoc's own suggestions
+are made anew (:attr:`Project.rebased`).
 """
 
 from __future__ import annotations
@@ -193,6 +198,7 @@ class Project:
         self.size = size
         self.options = options
         self.pages = [_Page() for _ in range(len(doc))]
+        self.rebased = False  # taken from a document of another file with the same pages
         self.models: Path | None = None  # the folder of models the suggestion may use
         self._layer: dict[int, bool] = {}
         self._images: dict[int, tuple[str, tuple[bytes, float, float]]] = {}
@@ -200,18 +206,27 @@ class Project:
     # -- opening and saving --------------------------------------------------------------------
     @classmethod
     def open(cls, source: str | Path, options: Options | None = None,
-             config: dict[str, Any] | None = None) -> Project:
+             config: dict[str, Any] | None = None, same_document: bool = False) -> Project:
         """A project on ``source`` (a photo, an image, a PDF): fresh with ``options``, or
         as ``config`` left it (whose settings then count).  Raises "config-mismatch" when
         the document belongs to another file, and what
-        :func:`optdoc.loading.open_document` raises."""
+        :func:`optdoc.loading.open_document` raises.
+
+        ``same_document``: the caller knows that ``source`` shows the very pages the
+        document was made on, as another file (a picture, and typdoc's PDF of it).  The
+        document is then taken where every page has the same size ("config-mismatch"
+        where one has not): a person's plans stay, the rest is suggested anew."""
         source = Path(source)
         if not source.is_file():
             raise OptdocError("missing")
         sha256 = documents.digest(source)
+        other = False
         if config is not None:
             named = config.get("input")
-            if not isinstance(named, dict) or named.get("sha256") != sha256:
+            if not isinstance(named, dict):
+                raise OptdocError("config-mismatch")
+            other = named.get("sha256") != sha256
+            if other and not same_document:
                 raise OptdocError("config-mismatch")
             options = Options.from_dict(config.get("options", {}))
         options = options or Options()
@@ -219,11 +234,34 @@ class Project:
         project = cls(source, doc, sha256, source.stat().st_size, options)
         if config is not None:
             try:
-                project._take_pages(config.get("pages"))
+                if other:
+                    project._take_persons(config)
+                else:
+                    project._take_pages(config.get("pages"))
             except Exception:
                 project.close()
                 raise
         return project
+
+    def _take_persons(self, config: dict[str, Any]) -> None:
+        """The plans a person made, from a document of another file that shows the same
+        pages: every page must have the size the document names (to a hundredth of a
+        point); optdoc suggests the rest anew."""
+        sizes = config["input"].get("pages")
+        if not isinstance(sizes, list) or len(sizes) != len(self.pages):
+            raise OptdocError("config-mismatch")
+        for n, size in enumerate(sizes):
+            rect = self.original[n].rect
+            if not isinstance(size, dict) or not all(
+                    isinstance(size.get(k), int | float) and abs(size[k] - v) <= 0.01
+                    for k, v in (("width", rect.width), ("height", rect.height))):
+                raise OptdocError("config-mismatch")
+        pages = config.get("pages")
+        self._take_pages(pages)  # checked as a document of this file would be
+        for page in self.pages:
+            if not page.by_person:  # optdoc's own: suggested anew for this file
+                page.decided, page.plan, page.found_with = False, None, []
+        self.rebased = True
 
     def _take_pages(self, pages: Any) -> None:
         """The pages of a configuration document: one entry per page of the document."""

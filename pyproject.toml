@@ -1,6 +1,6 @@
 [project]
 name = "optdoc"
-version = "0.10.1"
+version = "0.11.0"
 description = "Makes photographed and scanned pages faithful: upright, unwarped in their true proportions, straightened, evenly lit, in their own colours; reproducible."
 readme = "README.md"
 requires-python = ">=3.12"

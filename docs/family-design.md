@@ -253,12 +253,22 @@ stage takes one restriction away, and docrepro follows each):
   picture's own pixels, upright, for a picture. It looks at a picture as the page typdoc
   binds it into, as optdoc does, and finds optdoc's frames in the document beside the
   picture. docrepro (0.7.0) takes a picture through optdoc and ocrdoc as a picture.
-- **tagdoc** describes PDFs only and is to write into JPEG and PNG as medRDS 7.4 says, and
-  into a sidecar for the other formats.
-- **docrepro's window** keeps typdoc on for a picture as long as a step of it reads PDFs
-  only: until tagdoc takes pictures.
-- **To tidy:** optdoc and ocrdoc each hold the few lines that make a page of a picture; they
-  belong in doccor, with its next release (which every tool then follows).
+- **tagdoc describes pictures** (0.3.0) and writes the description into the picture where
+  its format has a place: the XMP, and the two texts EXIF has for a description in step
+  (`ImageDescription`, `Artist`), in JPEG, PNG, TIFF, WebP and HEIC; the XMP in a GIF; a
+  sidecar beside a BMP and a PNM. The picture's own data are never touched; nothing in an
+  EXIF block moves, and what is replaced is gone from the file. A HEIC photo is written
+  only when libheif then shows the same pixels and finds the description. medRDS (0.15)
+  names fewer places than that (PDF, JPEG, PNG); its reference library reads them all.
+  What tagdoc suggests for a picture comes from the reading ocrdoc laid beside it.
+- **Every step keeps the type it is handed**, with that: docrepro (0.8.0) takes a picture
+  through every step as a picture when typdoc is left out, and its window lets typdoc be
+  switched for a picture.
+- **doccor holds the page of a picture** (0.3.0): optdoc and ocrdoc each had the lines for
+  it; now it is the same in every tool by construction.
+- **Left to do:** a person's plans in optdoc are lost when typdoc is switched in docrepro's
+  window (optdoc's document names its input by its hash); the page is the same either
+  way, so they could go over. Several pictures of one document through the whole chain.
 
 ## The command lines
 

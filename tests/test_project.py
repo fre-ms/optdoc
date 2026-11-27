@@ -197,3 +197,61 @@ def test_refused_configurations(tmp_path: Path, report: Path) -> None:
     assert caught.value.details == {"reason": "format"}
     assert Options.from_dict({"colour_pages": "png"}).colour_pages == "png"
     assert Options.from_dict({"paper": "a5"}) == Options()  # no setting any more: ignored
+
+
+@needs_opencv
+def test_the_same_pages_as_another_file(tmp_path: Path, report: Path) -> None:
+    """A picture and a PDF that shows it page for page (as typdoc binds it): a caller that
+    knows they are the same document takes a document of the one for the other.  What a
+    person planned stays; optdoc's own plans are suggested anew; a page of another size,
+    or no word of the caller, is another file."""
+    import cv2
+    from doccor import pictures as view
+
+    from tests.synthetic import camera_photo
+
+    photo = tmp_path / "foto.png"
+    cv2.imwrite(str(photo), camera_photo(report, pitch=14, fill=0.85, size=(900, 1200))[0])
+    bound = tmp_path / "foto.pdf"
+    pages = view.pages(photo)
+    pages.save(bound)
+    pages.close()
+    project = Project.open(photo)
+    try:
+        suggested = project.plan(0)
+        assert suggested is not None and suggested.unwarp
+        mine = cleanup.CleanupPlan.from_dict({**suggested.full_dict(), "contrast": True,
+                                              "contrast_strength": 4})
+        project.set_plan(0, mine)
+        config = project.config()
+    finally:
+        project.close()
+    with pytest.raises(OptdocError) as caught:
+        Project.open(bound, config=config)
+    assert caught.value.kind == "config-mismatch"
+    taken = Project.open(bound, config=config, same_document=True)
+    try:
+        assert taken.rebased and taken.decided_by_person == [0]
+        assert taken.plan(0).full_dict() == mine.full_dict()
+        assert taken.frame(0) == config["pages"][0]["frame"]  # the same page, the same frame
+        assert taken.config()["input"]["suffix"] == ".pdf"
+    finally:
+        taken.close()
+    auto = Project.open(photo)
+    try:
+        auto_config = auto.config()
+    finally:
+        auto.close()
+    again = Project.open(bound, config=auto_config, same_document=True)
+    try:  # optdoc's own plan is made anew on this file, and comes out the same
+        assert again.rebased and again.decided_by_person == []
+        assert again.plan(0).full_dict() == suggested.full_dict()
+    finally:
+        again.close()
+    other = tmp_path / "anders.pdf"
+    with pymupdf.open() as doc:
+        doc.new_page(width=595, height=842)
+        doc.save(other)
+    with pytest.raises(OptdocError) as caught:
+        Project.open(other, config=config, same_document=True)
+    assert caught.value.kind == "config-mismatch"
