@@ -266,9 +266,16 @@ stage takes one restriction away, and docrepro follows each):
   switched for a picture.
 - **doccor holds the page of a picture** (0.3.0): optdoc and ocrdoc each had the lines for
   it; now it is the same in every tool by construction.
-- **Left to do:** a person's plans in optdoc are lost when typdoc is switched in docrepro's
-  window (optdoc's document names its input by its hash); the page is the same either
-  way, so they could go over. Several pictures of one document through the whole chain.
+- **A person's plans go over when typdoc is switched** (optdoc 0.11.0, `same_document`):
+  the page of a picture is the same either way.
+- **Several pictures of one document** go through the whole chain as one (docrepro 0.9.0):
+  typdoc binds them, and a file of several pictures (a TIFF of several pages) gives a page
+  for each (typdoc 0.3.0, as medRDS 9.5 says from 0.15.1). Several files are one document
+  only so bound; where typdoc does not bind them, each is a document of its own (the
+  user's decision), and `--each` asks for that even for pictures.
+- **The places of every picture format are the standard's** (medRDS 0.15.1, 7.4): its
+  reference library writes them as tagdoc does, byte for byte, with EXIF in step.
+- **The camera's date** is the clinical date where a person chooses so (tagdoc 0.4.0).
 
 ## The command lines
 
