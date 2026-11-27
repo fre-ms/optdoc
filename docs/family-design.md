@@ -247,12 +247,18 @@ stage takes one restriction away, and docrepro follows each):
   it was promised: a HEIC picture is written again byte for byte (pillow-heif 1.9.0, x265
   4.3, on arm64; not compared between platforms). docrepro (0.6.0) writes a picture as its
   result, with the chain document beside it, and says that a step reading PDFs needs typdoc.
-- **ocrdoc** reads PDFs only and is to read pictures, its reading saying whether a box is in
-  points or in pixels, and lay the reading beside the picture.
+- **ocrdoc reads pictures** (0.4.0) and hands a picture on as it came, byte for byte; the
+  reading, the Markdown and its configuration document lie beside it. Every page of the
+  reading says the unit of its boxes (`ocrdoc-reading` 2): points for a page of a PDF, the
+  picture's own pixels, upright, for a picture. It looks at a picture as the page typdoc
+  binds it into, as optdoc does, and finds optdoc's frames in the document beside the
+  picture. docrepro (0.7.0) takes a picture through optdoc and ocrdoc as a picture.
 - **tagdoc** describes PDFs only and is to write into JPEG and PNG as medRDS 7.4 says, and
   into a sidecar for the other formats.
-- **docrepro's window** is built on the steps that read PDFs: for a picture typdoc stays on
-  there until ocrdoc reads pictures.
+- **docrepro's window** keeps typdoc on for a picture as long as a step of it reads PDFs
+  only: until tagdoc takes pictures.
+- **To tidy:** optdoc and ocrdoc each hold the few lines that make a page of a picture; they
+  belong in doccor, with its next release (which every tool then follows).
 
 ## The command lines
 
