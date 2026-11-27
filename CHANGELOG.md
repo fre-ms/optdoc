@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.9.0 (2026-11-27)
+
+Interface 4: one field renamed, in every tool of docrepro at once.
+
+### Changed
+
+- **The answer names the prepared document `document`**, no longer `pdf` (`run`, and `edit` on
+  Apply); `optdoc.output.write` returns it under that key. No step of docrepro is to force a
+  file type, so a document need not be a PDF, and a field called `pdf` would then point at a
+  picture. optdoc itself still writes a PDF; that it writes back the type it was handed is to
+  come. Callers read `document` where they read `pdf`.
+
 ## 0.8.0 (2026-11-26)
 
 Models as an optional download, and the first one: a page that stands on its head or lies on

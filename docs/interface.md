@@ -1,6 +1,6 @@
 # optdoc's command line as an interface
 
-**Interface 3**, since optdoc 0.7.0 (this description: optdoc 0.8.0). This is what a program may
+**Interface 4**, since optdoc 0.9.0. This is what a program may
 rely on when it calls optdoc, whatever language it is written in: a records app, a pseudonymiser,
 a script, docrepro.
 
@@ -13,14 +13,19 @@ happened). Releases are tagged; pin a tag, not a branch.
 optdoc does one step of docrepro: it makes a photographed or scanned page **faithful**. Reading
 the page is ocrdoc's step after it.
 
-**From interface 2:** optdoc no longer reads: `readers`, `prepare` and `bench` are gone, and so are
+**From interface 3:** the answer names the prepared document `document`, no longer `pdf`, as every
+tool of docrepro does from now on: a document need not be a PDF (no step is to force a file type),
+and a field called `pdf` would then point at a picture. Nothing else changed; optdoc still writes
+a PDF.
+
+**From interface 2 (optdoc 0.7.0):** optdoc no longer reads: `readers`, `prepare` and `bench` are gone, and so are
 the reading, the Markdown, the text layer and the options of the OCR engines and the areas
 (`--reader`, `--languages`, `--no-tables`, `--no-structure`, `--no-cells`, `--no-areas`), with the
 kinds of error `unknown-reader`, `no-reader`, `reader-failed`, `not-ocr` and `page-text`. New:
 `about`, `run` (the preparation part of `prepare`), the configuration document version 2 with a
 frame per page, and pages in their colours.
 
-**Added within interface 3 (optdoc 0.8.0):** models as an optional download: the commands
+**Added within interface 3 (optdoc 0.8.0), and kept:** models as an optional download: the commands
 `models list` and `models fetch`, the option `--models`, `models` in the answer of `about`, the
 key `models` on a page of the configuration document, and the kinds of error `unknown-model`,
 `model-unreachable` and `model-checksum`.
@@ -46,13 +51,13 @@ Every answer has these two fields:
 
 | field | example | meaning |
 |---|---|---|
-| `interface` | `3` | the version of this description |
-| `made_with` | `"optdoc 0.8.0"` | the program and its version, for the record of what made a file |
+| `interface` | `4` | the version of this description |
+| `made_with` | `"optdoc 0.9.0"` | the program and its version, for the record of what made a file |
 
 ## `about`: what this installation can do
 
 ```json
-{"interface": 3, "made_with": "optdoc 0.8.0", "version": "0.8.0",
+{"interface": 4, "made_with": "optdoc 0.9.0", "version": "0.9.0",
  "clean_up": true, "heic": true, "window": true, "upside_down": false,
  "models": [{"name": "page-orientation", "…": "…", "present": null}]}
 ```
@@ -89,8 +94,8 @@ setting; `--paper`, `--photo`, `--scan`, `--no-clean-up` and `--colour-pages` be
 The answer:
 
 ```json
-{"interface": 3, "made_with": "optdoc 0.8.0",
- "pdf": "<folder>/<stem>.pdf", "config": "<folder>/<stem>.optdoc.json",
+{"interface": 4, "made_with": "optdoc 0.9.0",
+ "document": "<folder>/<stem>.pdf", "config": "<folder>/<stem>.optdoc.json",
  "pages": 2, "cleaned_up": [1, 2], "unwarped": [1], "decided": []}
 ```
 
@@ -179,7 +184,7 @@ optdoc models fetch <name> --to <folder> [--progress]
 `models list` answers with the models optdoc can use:
 
 ```json
-{"interface": 3, "made_with": "optdoc 0.8.0",
+{"interface": 4, "made_with": "optdoc 0.9.0",
  "models": [{"name": "page-orientation", "file": "pp-lcnet-x1-0-doc-ori.onnx",
              "url": "https://huggingface.co/PaddlePaddle/PP-LCNet_x1_0_doc_ori_onnx/resolve/7330ab7039123e46af2dc03154b9969aa412c61d/inference.onnx",
              "sha256": "af9a0a4f317ff0709ce752067807f819cb15d883f8ecad89f28df1c6ee2d9c92",
@@ -219,7 +224,7 @@ the result again from the document needs no model and no `--models`.
 ## The configuration document: `optdoc-config`, version 2
 
 ```json
-{"format": "optdoc-config", "version": 2, "made_with": "optdoc 0.8.0",
+{"format": "optdoc-config", "version": 2, "made_with": "optdoc 0.9.0",
  "input": {"sha256": "…", "bytes": 245678, "suffix": ".jpg",
            "pages": [{"width": 595.276, "height": 841.89}]},
  "options": {"paper": "a4", "photo": null, "clean_up": true, "colour_pages": "jpeg"},
@@ -254,7 +259,7 @@ document and with the PDF, and `edit`.
 ## Failures
 
 ```json
-{"interface": 3, "made_with": "optdoc 0.8.0", "error": "unsupported",
+{"interface": 4, "made_with": "optdoc 0.9.0", "error": "unsupported",
  "details": {"suffix": ".docx"},
  "message": {"en": "optdoc cannot open files of type .docx.",
              "de": "Dateien vom Typ .docx kann optdoc nicht öffnen."}}

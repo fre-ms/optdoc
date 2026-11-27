@@ -30,7 +30,7 @@ from optdoc.errors import OptdocError
 from optdoc.models import CATALOGUE
 from optdoc.project import SUFFIX, Options, Project, load_config
 
-INTERFACE = 3  # the version of docs/interface.md the answers follow
+INTERFACE = 4  # the version of docs/interface.md the answers follow
 TOOL = "optdoc"
 
 

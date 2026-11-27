@@ -26,7 +26,7 @@ def _write(project: Project, folder: Path) -> dict[str, bytes]:
         paths = output.write(prepared, folder)
     finally:
         prepared.close()
-    return {k: paths[k].read_bytes() for k in ("pdf", "config")}
+    return {k: paths[k].read_bytes() for k in ("document", "config")}
 
 
 @needs_opencv

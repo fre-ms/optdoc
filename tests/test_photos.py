@@ -91,7 +91,7 @@ def test_bound_photo_prepared_upright(tmp_path: Path) -> None:
                 prepared.close()
         finally:
             project.close()
-        with pymupdf.open(paths["pdf"]) as out:
+        with pymupdf.open(paths["document"]) as out:
             assert out[0].rotation == 0 and out[0].rect.height > out[0].rect.width
 
 

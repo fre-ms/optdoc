@@ -119,7 +119,7 @@ def test_pages_set_upright_by_the_model(tmp_path: Path, report: Path) -> None:
     config = load_config(first["config"])
     assert [p["plan"]["rotation"] for p in config["pages"]] == [180, 270]
     assert [p["models"] for p in config["pages"]] == [["page-orientation"]] * 2
-    with pymupdf.open(first["pdf"]) as doc:  # both pages upright: portrait
+    with pymupdf.open(first["document"]) as doc:  # both pages upright: portrait
         assert all(page.rect.height > page.rect.width for page in doc)
     again = Project.open(source, config=config)  # no models folder: none is needed
     try:
@@ -141,7 +141,7 @@ def test_pages_set_upright_by_the_model(tmp_path: Path, report: Path) -> None:
         assert again.config()["pages"][0]["plan"]["rotation"] == 0
     finally:
         again.close()
-    for key in ("pdf", "config"):
+    for key in ("document", "config"):
         assert first[key].read_bytes() == second[key].read_bytes(), key
     with_model = Project.open(source, config=config)  # and with it: the suggestion again
     with_model.models = MODELS

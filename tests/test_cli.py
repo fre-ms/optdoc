@@ -136,9 +136,10 @@ def test_answer_names_the_results(tmp_path: Path, report: Path,
     prepared."""
     status, answer, err = _answer(capsys, ["run", str(report), "--out", str(tmp_path / "out")])
     assert status == 0 and err == ""
-    assert set(answer) == HEAD | {"pdf", "config", "pages", "cleaned_up", "unwarped", "decided"}
+    assert set(answer) == HEAD | {"document", "config", "pages", "cleaned_up", "unwarped",
+                                  "decided"}
     assert answer["pages"] == 2 and answer["cleaned_up"] == [] == answer["decided"]
-    assert all(Path(answer[k]).parent == tmp_path / "out" for k in ("pdf", "config"))
+    assert all(Path(answer[k]).parent == tmp_path / "out" for k in ("document", "config"))
 
 
 def test_standard_error_is_optdocs_own() -> None:
@@ -203,7 +204,7 @@ def test_run_on_the_command_line(tmp_path: Path, report: Path) -> None:
     second = _run(["run", str(source), "--out", str(tmp_path / "zwei"), "--config",
                    answer["config"]])
     again = json.loads(second.stdout)
-    for key in ("pdf", "config"):
+    for key in ("document", "config"):
         assert Path(again[key]).read_bytes() == Path(answer[key]).read_bytes(), key
 
 
@@ -223,5 +224,5 @@ def test_edit_goes_through_and_leaves_nothing_behind(tmp_path: Path, report: Pat
     for name, folder in elsewhere.items():
         assert not any(folder.rglob("*")), (name, list(folder.rglob("*")))
     prepared = json.loads(_run(["run", str(source), "--out", str(tmp_path / "p")]).stdout)
-    for key in ("pdf", "config"):
+    for key in ("document", "config"):
         assert Path(answer[key]).read_bytes() == Path(prepared[key]).read_bytes(), key

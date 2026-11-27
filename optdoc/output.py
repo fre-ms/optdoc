@@ -39,18 +39,19 @@ def pdf_bytes(prepared: Prepared) -> bytes:
 
 def write(prepared: Prepared, folder: str | Path, stem: str | None = None) -> dict[str, Path]:
     """Write ``<stem>.pdf`` and the configuration document ``<stem>.optdoc.json`` into
-    ``folder`` (created when missing); returns the paths.  Nothing is written anywhere
-    else.  Raises "same-as-source" when the PDF would replace the document that was
-    prepared, "unwritable" when the folder cannot take the files."""
+    ``folder`` (created when missing); returns the paths by kind: "document" (the prepared
+    document) and "config".  Nothing is written anywhere else.  Raises "same-as-source"
+    when the PDF would replace the document that was prepared, "unwritable" when the
+    folder cannot take the files."""
     target = Path(folder)
     stem = stem or prepared.source.stem
-    paths = {"pdf": target / f"{stem}.pdf", "config": target / f"{stem}{SUFFIX}"}
-    if paths["pdf"].resolve() == prepared.source.resolve():
+    paths = {"document": target / f"{stem}.pdf", "config": target / f"{stem}{SUFFIX}"}
+    if paths["document"].resolve() == prepared.source.resolve():
         raise OptdocError("same-as-source")
     pdf = pdf_bytes(prepared)
     try:
         target.mkdir(parents=True, exist_ok=True)
-        paths["pdf"].write_bytes(pdf)
+        paths["document"].write_bytes(pdf)
         paths["config"].write_bytes(config_bytes(prepared.config))
     except OSError as e:
         raise OptdocError("unwritable") from e
