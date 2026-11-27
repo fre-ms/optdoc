@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.10.1 (2026-11-27)
+
+The picture as a page is written once, in doccor (0.3.0). Nothing a caller relies on changed:
+interface 5, `optdoc-config` version 3.
+
+### Changed
+
+- **How a picture is looked at is doccor's** (`doccor.pictures`): optdoc and ocrdoc each had
+  the lines that make a page of a picture; now there is one place, and the page is the same in
+  every tool by construction. `optdoc.loading` keeps `open_document`, `is_picture` and
+  `LONG_SIDE`; `IMAGE_SUFFIXES` and `HEIC_SUFFIXES` are `doccor.pictures.SUFFIXES` and `HEIC`.
+- **A JPEG is one picture, whatever else it carries.** A phone's JPEG may hold a second image
+  beside the photo (a gain map for bright screens); optdoc looked at such a file as one page
+  already, and `optdoc.pictures.count` now says one as well.
+- The kinds of error `unsupported`, `unreadable` and `encrypted` are worded in doccor, with the
+  same words.
+
 ## 0.10.0 (2026-11-27)
 
 A picture stays a picture. docrepro forces no file type, and optdoc is the first of its tools to

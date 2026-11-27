@@ -21,8 +21,8 @@ wheels = [
 
 [[package]]
 name = "doccor"
-version = "0.2.0"
-source = { git = "https://github.com/fre-ms/doccor?tag=v0.2.0#c1348a3bb917e1f1bf659647b5d237ee38e996d7" }
+version = "0.3.0"
+source = { git = "https://github.com/fre-ms/doccor?tag=v0.3.0#fae9a71b85dd8239714c29f7169a223c8a50a7c9" }
 dependencies = [
     { name = "pymupdf" },
 ]
@@ -131,7 +131,7 @@ wheels = [
 
 [[package]]
 name = "optdoc"
-version = "0.10.0"
+version = "0.10.1"
 source = { editable = "." }
 dependencies = [
     { name = "doccor" },
@@ -158,7 +158,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "doccor", git = "https://github.com/fre-ms/doccor?tag=v0.2.0" },
+    { name = "doccor", git = "https://github.com/fre-ms/doccor?tag=v0.3.0" },
     { name = "numpy", marker = "extra == 'cleanup'", specifier = ">=1.26" },
     { name = "opencv-python", marker = "extra == 'cleanup'", specifier = ">=4.8" },
     { name = "pillow", marker = "extra == 'cleanup'", specifier = ">=13" },

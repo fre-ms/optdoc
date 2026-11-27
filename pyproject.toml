@@ -1,6 +1,6 @@
 [project]
 name = "optdoc"
-version = "0.10.0"
+version = "0.10.1"
 description = "Makes photographed and scanned pages faithful: upright, unwarped in their true proportions, straightened, evenly lit, in their own colours; reproducible."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -20,7 +20,7 @@ classifiers = [
 dependencies = [
   # the core the tools of docrepro share: configuration documents, errors, the command
   # line's manners, no network, the window's building blocks
-  "doccor>=0.2",
+  "doccor>=0.3",
   # <2: PyMuPDF 2.0 (MuPDF 1.28.5) shifts glyphs after a redaction; optdoc's pages are
   # redacted by PseudonyMed, so both pin the same range
   "pymupdf>=1.25,<2",
@@ -37,7 +37,7 @@ gui = [
 
 [tool.uv.sources]
 # a released tag: optdoc moves to a new doccor on purpose
-doccor = { git = "https://github.com/fre-ms/doccor", tag = "v0.2.0" }
+doccor = { git = "https://github.com/fre-ms/doccor", tag = "v0.3.0" }
 
 [project.scripts]
 optdoc = "optdoc.cli:main"

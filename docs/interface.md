@@ -58,12 +58,12 @@ Every answer has these two fields:
 | field | example | meaning |
 |---|---|---|
 | `interface` | `5` | the version of this description |
-| `made_with` | `"optdoc 0.10.0"` | the program and its version, for the record of what made a file |
+| `made_with` | `"optdoc 0.10.1"` | the program and its version, for the record of what made a file |
 
 ## `about`: what this installation can do
 
 ```json
-{"interface": 5, "made_with": "optdoc 0.10.0", "version": "0.10.0",
+{"interface": 5, "made_with": "optdoc 0.10.1", "version": "0.10.1",
  "clean_up": true, "heic": true, "window": true, "upside_down": false,
  "models": [{"name": "page-orientation", "…": "…", "present": null}]}
 ```
@@ -113,7 +113,7 @@ A picture carries no configuration document; for one, `--config` takes the JSON 
 The answer:
 
 ```json
-{"interface": 5, "made_with": "optdoc 0.10.0",
+{"interface": 5, "made_with": "optdoc 0.10.1",
  "document": "<folder>/<stem>.pdf", "config": "<folder>/<stem>.optdoc.json",
  "pages": 2, "cleaned_up": [1, 2], "unwarped": [1], "decided": []}
 ```
@@ -203,7 +203,7 @@ optdoc models fetch <name> --to <folder> [--progress]
 `models list` answers with the models optdoc can use:
 
 ```json
-{"interface": 5, "made_with": "optdoc 0.10.0",
+{"interface": 5, "made_with": "optdoc 0.10.1",
  "models": [{"name": "page-orientation", "file": "pp-lcnet-x1-0-doc-ori.onnx",
              "url": "https://huggingface.co/PaddlePaddle/PP-LCNet_x1_0_doc_ori_onnx/resolve/7330ab7039123e46af2dc03154b9969aa412c61d/inference.onnx",
              "sha256": "af9a0a4f317ff0709ce752067807f819cb15d883f8ecad89f28df1c6ee2d9c92",
@@ -243,7 +243,7 @@ the result again from the document needs no model and no `--models`.
 ## The configuration document: `optdoc-config`, version 3
 
 ```json
-{"format": "optdoc-config", "version": 3, "made_with": "optdoc 0.10.0",
+{"format": "optdoc-config", "version": 3, "made_with": "optdoc 0.10.1",
  "input": {"sha256": "…", "bytes": 245678, "suffix": ".jpg",
            "pages": [{"width": 595.276, "height": 841.89}]},
  "options": {"photo": null, "clean_up": true, "colour_pages": "jpeg"},
@@ -278,7 +278,7 @@ document and with the PDF, and `edit`.
 ## Failures
 
 ```json
-{"interface": 5, "made_with": "optdoc 0.10.0", "error": "unsupported",
+{"interface": 5, "made_with": "optdoc 0.10.1", "error": "unsupported",
  "details": {"suffix": ".docx"},
  "message": {"en": "optdoc cannot open files of type .docx.",
              "de": "Dateien vom Typ .docx kann optdoc nicht öffnen."}}

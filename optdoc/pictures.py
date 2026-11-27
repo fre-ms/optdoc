@@ -25,6 +25,8 @@ import io
 from pathlib import Path
 from typing import Any
 
+from doccor import pictures as view
+
 from optdoc.errors import OptdocError
 
 QUALITY = 92  # of a picture written with loss (JPEG, HEIC, WebP)
@@ -60,25 +62,24 @@ def _opened(path: Path) -> Any:
 
 
 def count(path: Path) -> int:
-    """How many pictures the file holds (a TIFF may hold several)."""
-    with _opened(path) as image:
-        return int(getattr(image, "n_frames", 1))
+    """How many pictures the file holds (a TIFF may hold several; a JPEG is one, whatever
+    else it carries)."""
+    try:
+        return view.count(path)
+    except Exception as e:  # Pillow words its failures with the file's name
+        raise OptdocError("unreadable") from e
 
 
 def pixels(path: Path, n: int = 0) -> Any:
     """Picture ``n`` of the file as a BGR NumPy image, upright as its EXIF orientation
-    says: the pixels as they came, not a rendering of them."""
+    says: the pixels as they came, not a rendering of them (the very pixels the page of
+    the picture shows, :func:`doccor.pictures.frame`)."""
     import numpy as np
-    from PIL import ImageOps
 
-    with _opened(path) as image:
-        image.seek(n)
-        upright = ImageOps.exif_transpose(image)
-        if upright.mode in ("RGBA", "LA", "PA") or "transparency" in upright.info:
-            rgba = upright.convert("RGBA")
-            white = _pillow().new("RGBA", rgba.size, (255, 255, 255, 255))
-            upright = _pillow().alpha_composite(white, rgba)
-        rgb = np.asarray(upright.convert("RGB"))
+    try:
+        rgb = np.asarray(view.frame(path, n))
+    except Exception as e:
+        raise OptdocError("unreadable") from e
     return rgb[:, :, ::-1].copy()
 
 
